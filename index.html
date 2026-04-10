@@ -519,7 +519,7 @@ function render() {
   else if (curTab === 'sales') el.innerHTML = renderSales();
   else if (curTab === 'analytics') el.innerHTML = renderAnalytics();
   bindFormFields();
-  if (curTab === 'analytics') renderCharts();
+  if (curTab === 'analytics') { renderCharts(); }
 }
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
@@ -886,14 +886,53 @@ function renderSales() {
 }
 
 // ─── Analytics ────────────────────────────────────────────────────────────────
-function renderAnalytics() {
-  const products = getProductNames();
-  const perProd = products.map(name => {
+// ─── Analytics state ─────────────────────────────────────────────────────────
+let aState = {
+  mode: 'profit',        // 'profit' | 'revenue' | 'batches'
+  period: 'month',       // 'month' | 'quarter' | 'year' | 'custom'
+  dateFrom: '',
+  dateTo: '',
+};
+
+const CHART_COLORS = [
+  '#6C63FF','#5DCAA5','#EF9F27','#E24B4A','#85B7EB','#ED93B1','#97C459','#F0997B','#9d99ff','#FAC775'
+];
+
+function getPeriodBounds() {
+  const now = new Date();
+  let from, to;
+  if (aState.period === 'month') {
+    from = new Date(now.getFullYear(), now.getMonth(), 1);
+    to   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  } else if (aState.period === 'quarter') {
+    const q = Math.floor(now.getMonth() / 3);
+    from = new Date(now.getFullYear(), q * 3, 1);
+    to   = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59);
+  } else if (aState.period === 'year') {
+    from = new Date(now.getFullYear(), 0, 1);
+    to   = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+  } else if (aState.period === 'custom') {
+    from = aState.dateFrom ? new Date(aState.dateFrom) : new Date(0);
+    to   = aState.dateTo   ? new Date(aState.dateTo + 'T23:59:59') : new Date();
+  } else {
+    from = new Date(0); to = new Date();
+  }
+  return { from: from.getTime(), to: to.getTime() };
+}
+
+function filterSales(sales) {
+  const { from, to } = getPeriodBounds();
+  return sales.filter(s => s.date >= from && s.date <= to);
+}
+
+function calcPerProd(salesSubset) {
+  const products = [...new Set(S.purchases.filter(p => p.status === 'warehouse').map(p => p.name))];
+  return products.map(name => {
     const lots = S.purchases.filter(p => p.name === name && p.status === 'warehouse');
     const tq = lots.reduce((a, p) => a + p.qty, 0);
     const tc = lots.reduce((a, p) => a + calcP(p).totalRub, 0);
     const pu = tq > 0 ? tc / tq : 0;
-    const salesArr = S.sales.filter(s => s.name === name);
+    const salesArr = salesSubset.filter(s => s.name === name);
     const soldQty = salesArr.reduce((a, s) => a + s.qty, 0);
     const revenue = salesArr.reduce((a, s) => a + s.qty * s.price, 0);
     const commissions = salesArr.reduce((a, s) => a + (s.qty * s.price * (s.commission || 0) / 100), 0);
@@ -904,141 +943,427 @@ function renderAnalytics() {
     const inv = getInventory();
     const remaining = Math.max(0, inv[name] ? inv[name].qty : 0);
     return { name, tc, soldQty, remaining, revenue, commissions, profit, margin, roi };
+  }).filter(p => p.soldQty > 0 || p.remaining > 0).sort((a, b) => b.profit - a.profit);
+}
+
+function calcPerBatch() {
+  return (S.batches || []).map(b => {
+    const items = S.purchases.filter(p => p.batchId === b.id);
+    const invested = items.reduce((a, p) => a + calcP(p).totalRub, 0);
+    const allNames = [...new Set(items.map(p => p.name))];
+    let revenue = 0, commissions = 0, cost = 0;
+    allNames.forEach(name => {
+      const lots = items.filter(p => p.name === name);
+      const tq = lots.reduce((a, p) => a + p.qty, 0);
+      const tc = lots.reduce((a, p) => a + calcP(p).totalRub, 0);
+      const pu = tq > 0 ? tc / tq : 0;
+      const salesArr = S.sales.filter(s => s.name === name);
+      salesArr.forEach(s => {
+        const rev = s.qty * s.price;
+        revenue += rev;
+        commissions += rev * (s.commission || 0) / 100;
+        cost += s.qty * pu;
+      });
+    });
+    const profit = revenue - commissions - cost;
+    const roi = invested > 0 ? profit / invested * 100 : 0;
+    return { label: b.label, date: b.date, invested, revenue, profit, roi, items: items.length };
   }).sort((a, b) => b.profit - a.profit);
+}
 
-  const maxP = Math.max(...perProd.map(p => Math.abs(p.profit)), 1);
-
-  const months = {};
-  S.sales.forEach(s => {
+function buildMonthlyLines() {
+  // Returns { months: [...keys], products: { name: [val per month] } }
+  const allSales = S.sales;
+  const monthSet = new Set();
+  allSales.forEach(s => {
     const d = new Date(s.date);
-    const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    const lots = S.purchases.filter(p => p.name === s.name && p.status === 'warehouse');
-    const tq = lots.reduce((a, p) => a + p.qty, 0);
-    const tc = lots.reduce((a, p) => a + calcP(p).totalRub, 0);
-    const pu = tq > 0 ? tc / tq : 0;
-    if (!months[k]) months[k] = { revenue: 0, profit: 0 };
-    months[k].revenue += s.qty * s.price;
-    months[k].profit += s.qty * s.price - (s.qty * s.price * (s.commission || 0) / 100) - s.qty * pu;
+    monthSet.add(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
   });
-  const mkeys = Object.keys(months).sort();
-  const mlabels = mkeys.map(k => { const [y, m] = k.split('-'); return `${m}.${y.slice(2)}`; });
+  const mkeys = [...monthSet].sort();
+  const products = [...new Set(S.purchases.filter(p => p.status === 'warehouse').map(p => p.name))];
+
+  const lines = {};
+  products.forEach(name => {
+    const lots = S.purchases.filter(p => p.name === name && p.status === 'warehouse');
+    const tq = lots.reduce((a,p) => a+p.qty, 0);
+    const tc = lots.reduce((a,p) => a+calcP(p).totalRub, 0);
+    const pu = tq > 0 ? tc/tq : 0;
+    lines[name] = mkeys.map(k => {
+      const [y,m] = k.split('-');
+      const salesInMonth = S.sales.filter(s => {
+        const d = new Date(s.date);
+        return s.name === name &&
+          d.getFullYear() === parseInt(y) &&
+          d.getMonth() + 1 === parseInt(m);
+      });
+      const revenue = salesInMonth.reduce((a,s) => a + s.qty * s.price, 0);
+      const commissions = salesInMonth.reduce((a,s) => a + s.qty * s.price * (s.commission||0)/100, 0);
+      const costVal = salesInMonth.reduce((a,s) => a + s.qty * pu, 0);
+      if (aState.mode === 'revenue') return Math.round(revenue);
+      return Math.round(revenue - commissions - costVal);
+    });
+  });
+
+  // monthly totals
+  const totals = mkeys.map((k,i) => {
+    return Object.values(lines).reduce((a, arr) => a + (arr[i] || 0), 0);
+  });
+
+  return { mkeys, mlabels: mkeys.map(k => { const [y,m]=k.split('-'); return `${m}.${y.slice(2)}`; }), lines, totals };
+}
+
+function periodLabel() {
+  const labels = { month: 'Этот месяц', quarter: 'Этот квартал', year: 'Этот год', custom: 'Период', all: 'Всё время' };
+  return labels[aState.period] || 'Период';
+}
+
+function renderAnalytics() {
+  const filteredSales = filterSales(S.sales);
+  const perProd = calcPerProd(filteredSales);
+  const maxP = Math.max(...perProd.map(p => Math.abs(p.profit)), 1);
+  const perBatch = calcPerBatch();
+  const now = new Date();
+  const defFrom = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+  const defTo = now.toISOString().slice(0,10);
+
+  // ── Summary stats ──────────────────────────────────────────────
+  // This year
+  const yearStart = new Date(now.getFullYear(), 0, 1).getTime();
+  const yearEnd   = new Date(now.getFullYear(), 11, 31, 23, 59, 59).getTime();
+  const yearSales = S.sales.filter(s => s.date >= yearStart && s.date <= yearEnd);
+
+  // This month
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const monthEnd   = new Date(now.getFullYear(), now.getMonth()+1, 0, 23,59,59).getTime();
+  const monthSales = S.sales.filter(s => s.date >= monthStart && s.date <= monthEnd);
+
+  function calcTotals(sales) {
+    let revenue = 0, profit = 0;
+    sales.forEach(s => {
+      const lots = S.purchases.filter(p => p.name === s.name && p.status === 'warehouse');
+      const tq = lots.reduce((a,p) => a+p.qty, 0);
+      const tc = lots.reduce((a,p) => a+calcP(p).totalRub, 0);
+      const pu = tq > 0 ? tc/tq : 0;
+      const rev = s.qty * s.price;
+      const comm = rev * (s.commission||0) / 100;
+      revenue += rev;
+      profit  += rev - comm - s.qty * pu;
+    });
+    return { revenue, profit };
+  }
+
+  const yearTotals  = calcTotals(yearSales);
+  const monthTotals = calcTotals(monthSales);
+
+  // Best batch by profit
+  const bestBatch = perBatch.length ? perBatch[0] : null;
 
   return `
+  <!-- KPI Summary -->
+  <div class="mgrid" style="grid-template-columns:repeat(2,1fr);margin-bottom:12px">
+    <div class="metric" style="padding:13px">
+      <div class="ml">Прибыль — ${now.getFullYear()}</div>
+      <div class="mv ${yearTotals.profit>=0?'g':'r'}" style="font-size:18px">${yearTotals.profit>=0?'+':''}${fmt(yearTotals.profit)} ₽</div>
+    </div>
+    <div class="metric" style="padding:13px">
+      <div class="ml">Выручка — ${now.getFullYear()}</div>
+      <div class="mv p" style="font-size:18px">${fmt(yearTotals.revenue)} ₽</div>
+    </div>
+    <div class="metric" style="padding:13px">
+      <div class="ml">Прибыль — этот месяц</div>
+      <div class="mv ${monthTotals.profit>=0?'g':'r'}" style="font-size:18px">${monthTotals.profit>=0?'+':''}${fmt(monthTotals.profit)} ₽</div>
+    </div>
+    <div class="metric" style="padding:13px">
+      <div class="ml">Лучшая партия</div>
+      <div class="mv g" style="font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${bestBatch ? bestBatch.label : '—'}</div>
+      ${bestBatch ? `<div style="font-size:11px;color:var(--text4);margin-top:2px">+${fmt(bestBatch.profit)} ₽ · ROI ${fmtf(bestBatch.roi)}%</div>` : ''}
+    </div>
+  </div>
+
+  <!-- Period picker -->
+  <div class="card" style="padding:12px 14px">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <div style="display:flex;gap:4px;flex-wrap:wrap;flex:1">
+        ${['month','quarter','year','all','custom'].map(p => {
+          const labels = {month:'Месяц',quarter:'Квартал',year:'Год',all:'Всё',custom:'Период'};
+          return `<button class="btn${aState.period===p?' p':''}" data-action="aperiod" data-val="${p}"
+            style="padding:6px 12px;font-size:12px;min-height:34px">${labels[p]}</button>`;
+        }).join('')}
+      </div>
+    </div>
+    ${aState.period === 'custom' ? `
+    <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+      <div class="fg" style="flex:1;min-width:120px">
+        <label>С</label>
+        <input class="inp" type="date" id="a-from" value="${aState.dateFrom||defFrom}" style="font-size:13px;padding:7px 10px;min-height:40px">
+      </div>
+      <div class="fg" style="flex:1;min-width:120px">
+        <label>По</label>
+        <input class="inp" type="date" id="a-to" value="${aState.dateTo||defTo}" style="font-size:13px;padding:7px 10px;min-height:40px">
+      </div>
+      <button class="btn p" data-action="aapply" style="min-height:40px;margin-top:18px;padding:0 16px;font-size:13px">Применить</button>
+    </div>` : ''}
+  </div>
+
+  <!-- Mode tabs -->
+  <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
+    ${[
+      ['profit','Прибыль по товарам'],
+      ['revenue','Выручка по товарам'],
+      ['batches','Прибыль по партиям'],
+      ['lines','Динамика по месяцам']
+    ].map(([m,l]) =>
+      `<button class="btn${aState.mode===m?' p':''}" data-action="amode" data-val="${m}"
+        style="padding:7px 13px;font-size:12px;min-height:36px">${l}</button>`
+    ).join('')}
+  </div>
+
+  <!-- Profit / Revenue by product -->
+  ${aState.mode === 'profit' || aState.mode === 'revenue' ? `
   <div class="card">
-    <div class="card-title">Прибыльность по товарам</div>
-    ${!perProd.length ? '<div class="empty">Нет данных о продажах</div>' :
-    perProd.map(p => {
-      const barW = maxP > 0 ? (Math.abs(p.profit) / maxP * 100).toFixed(1) : 0;
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">
+      <div class="card-title" style="margin-bottom:0">${aState.mode==='profit'?'Прибыль':'Выручка'} — ${periodLabel()}</div>
+      <div style="font-size:12px;color:var(--text4)">${filteredSales.length} продаж</div>
+    </div>
+    ${!perProd.filter(p=>p.soldQty>0).length ? '<div class="empty">Нет продаж за период</div>' :
+    perProd.filter(p=>p.soldQty>0).map(p => {
+      const val = aState.mode === 'profit' ? p.profit : p.revenue;
+      const maxVal = aState.mode === 'profit' ? maxP : Math.max(...perProd.map(x=>x.revenue),1);
+      const barW = (Math.abs(val) / maxVal * 100).toFixed(1);
+      const color = aState.mode === 'revenue' ? '#6C63FF' : (val >= 0 ? '#5DCAA5' : '#E24B4A');
       return `<div style="margin-bottom:16px">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
-          <span style="font-weight:600;color:var(--text2)">${p.name}</span>
-          <span style="font-weight:600" class="${p.profit >= 0 ? 'pp' : 'np'}">${p.profit >= 0 ? '+' : ''}${fmt(p.profit)} ₽</span>
+          <span style="font-weight:600;color:var(--text2);font-size:14px">${p.name}</span>
+          <span style="font-weight:600;font-size:14px" class="${val>=0?'pp':'np'}">${val>=0&&aState.mode==='profit'?'+':''}${fmt(val)} ₽</span>
         </div>
-        <div class="profbar-bg"><div class="profbar-fill" style="width:${barW}%;background:${p.profit >= 0 ? 'var(--green)' : 'var(--red)'}"></div></div>
-        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:4px;font-size:12px;color:var(--text4)">
+        <div class="profbar-bg"><div class="profbar-fill" style="width:${barW}%;background:${color}"></div></div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;font-size:12px;color:var(--text4)">
           <span>Маржа <b class="acc">${fmtf(p.margin)}%</b></span>
           <span>ROI <b class="acc">${fmtf(p.roi)}%</b></span>
           <span>Продано <b style="color:var(--text2)">${p.soldQty} шт.</b></span>
           <span>Остаток <b style="color:var(--text2)">${p.remaining} шт.</b></span>
+          <span>Выручка <b style="color:var(--text2)">${fmt(p.revenue)} ₽</b></span>
         </div>
       </div>`;
     }).join('')}
   </div>
-
   <div class="card">
     <div class="card-title">Детальная таблица</div>
     ${!perProd.length ? '<div class="empty">Нет данных</div>' : `
     <div class="tw"><table>
-      <thead><tr><th>Товар</th><th>Вложено</th><th>Выручка</th><th>Комис.</th><th>Прибыль</th><th>Маржа</th><th>ROI</th><th>Ост.</th></tr></thead>
+      <thead><tr><th>Товар</th><th>Выручка</th><th>Комис.</th><th>Прибыль</th><th>Маржа</th><th>ROI</th><th>Продано</th></tr></thead>
       <tbody>${perProd.map(p => `<tr>
         <td class="bold">${p.name}</td>
-        <td class="acc">${fmt(p.tc)} ₽</td>
         <td class="acc">${fmt(p.revenue)} ₽</td>
         <td style="color:var(--text4)">${fmt(p.commissions)} ₽</td>
-        <td class="${p.profit >= 0 ? 'pp' : 'np'}">${p.profit >= 0 ? '+' : ''}${fmt(p.profit)} ₽</td>
-        <td class="${p.profit >= 0 ? 'pp' : 'np'}">${fmtf(p.margin)}%</td>
-        <td class="${p.profit >= 0 ? 'pp' : 'np'}">${fmtf(p.roi)}%</td>
-        <td>${p.remaining}</td>
+        <td class="${p.profit>=0?'pp':'np'}">${p.profit>=0?'+':''}${fmt(p.profit)} ₽</td>
+        <td class="${p.profit>=0?'pp':'np'}">${fmtf(p.margin)}%</td>
+        <td class="${p.profit>=0?'pp':'np'}">${fmtf(p.roi)}%</td>
+        <td>${p.soldQty}</td>
       </tr>`).join('')}</tbody>
     </table></div>`}
+  </div>` : ''}
+
+  <!-- Batches -->
+  ${aState.mode === 'batches' ? `
+  <div class="card">
+    <div class="card-title">Прибыльность партий</div>
+    ${!perBatch.length ? '<div class="empty">Нет партий</div>' :
+    perBatch.map((b,i) => {
+      const maxBP = Math.max(...perBatch.map(x=>Math.abs(x.profit)),1);
+      const barW = (Math.abs(b.profit)/maxBP*100).toFixed(1);
+      return `<div style="margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+          <span style="font-weight:600;color:var(--text2)">${b.label}</span>
+          <span style="font-weight:600" class="${b.profit>=0?'pp':'np'}">${b.profit>=0?'+':''}${fmt(b.profit)} ₽</span>
+        </div>
+        <div class="profbar-bg"><div class="profbar-fill" style="width:${barW}%;background:${b.profit>=0?'#5DCAA5':'#E24B4A'}"></div></div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;font-size:12px;color:var(--text4)">
+          <span>Вложено <b style="color:var(--text2)">${fmt(b.invested)} ₽</b></span>
+          <span>Выручка <b style="color:var(--text2)">${fmt(b.revenue)} ₽</b></span>
+          <span>ROI <b class="acc">${fmtf(b.roi)}%</b></span>
+          <span>Товаров <b style="color:var(--text2)">${b.items}</b></span>
+          <span style="color:var(--text5)">${new Date(b.date).toLocaleDateString('ru-RU',{day:'2-digit',month:'short',year:'numeric'})}</span>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>
+  <div class="card">
+    <div class="card-title">Таблица партий</div>
+    <div class="tw"><table>
+      <thead><tr><th>Партия</th><th>Вложено</th><th>Выручка</th><th>Прибыль</th><th>ROI</th></tr></thead>
+      <tbody>${perBatch.map(b=>`<tr>
+        <td class="bold">${b.label}</td>
+        <td class="acc">${fmt(b.invested)} ₽</td>
+        <td class="acc">${fmt(b.revenue)} ₽</td>
+        <td class="${b.profit>=0?'pp':'np'}">${b.profit>=0?'+':''}${fmt(b.profit)} ₽</td>
+        <td class="${b.profit>=0?'pp':'np'}">${fmtf(b.roi)}%</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>` : ''}
+
+  <!-- Lines chart -->
+  ${aState.mode === 'lines' ? `
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;flex-wrap:wrap;gap:8px">
+      <div class="card-title" style="margin-bottom:0">Динамика по месяцам — каждый товар</div>
+      <div style="display:flex;gap:5px">
+        <button class="btn${aState.lineMetric!=='revenue'?' p':''}" data-action="alinemetric" data-val="profit" style="font-size:11px;padding:5px 10px;min-height:30px">Прибыль</button>
+        <button class="btn${aState.lineMetric==='revenue'?' p':''}" data-action="alinemetric" data-val="revenue" style="font-size:11px;padding:5px 10px;min-height:30px">Выручка</button>
+      </div>
+    </div>
+    <div id="lines-legend" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px;font-size:12px;color:var(--text4)">Загрузка...</div>
+    <div class="chart-wrap" style="height:280px">
+      <canvas id="chart-lines" role="img" aria-label="Динамика прибыли по товарам по месяцам">Данные</canvas>
+    </div>
   </div>
 
-  ${mkeys.length > 0 ? `
+  <!-- This month profit bar chart -->
   <div class="card">
-    <div class="card-title">Динамика по месяцам</div>
-    <div style="display:flex;gap:14px;margin-bottom:10px;font-size:12px;color:var(--text4)">
-      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--accent);margin-right:4px;vertical-align:middle"></span>Выручка</span>
-      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--green);margin-right:4px;vertical-align:middle"></span>Прибыль</span>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">
+      <div class="card-title" style="margin-bottom:0">Прибыль этого месяца — по дням</div>
+      <div id="month-total-label" style="font-size:13px;font-weight:600;color:var(--green)"></div>
     </div>
-    <div class="chart-wrap" style="height:200px"><canvas id="chart-months" role="img" aria-label="График выручки и прибыли по месяцам">Данные по месяцам</canvas></div>
-  </div>` : ''}
-
-  ${perProd.length > 0 ? `
-  <div class="card">
-    <div class="card-title">Прибыль по товарам</div>
-    <div class="chart-wrap" style="height:${Math.max(160, perProd.length * 44 + 60)}px">
-      <canvas id="chart-products" role="img" aria-label="Прибыль по товарам">Данные</canvas>
+    <div class="chart-wrap" style="height:180px">
+      <canvas id="chart-month" role="img" aria-label="Прибыль по дням текущего месяца">Данные</canvas>
     </div>
   </div>` : ''}
 
-  <script>window.__analyticsData = ${JSON.stringify({ mkeys, mlabels, months, perProd })};<\/script>`;
+  <script>window.__aReady=true;<\/script>`;
 }
 
 function renderCharts() {
-  const data = window.__analyticsData;
-  if (!data) return;
-  const { mkeys, mlabels, months, perProd } = data;
-
-  if (mkeys.length) {
-    const el = document.getElementById('chart-months');
+  if (aState.mode !== 'lines') return;
+  requestAnimationFrame(() => {
+    // ── Lines chart (per product per month) ───────────────────────
+    const el = document.getElementById('chart-lines');
     if (el) {
-      charts.months = new Chart(el, {
-        type: 'bar',
-        data: {
-          labels: mlabels,
-          datasets: [
-            { label: 'Выручка', data: mkeys.map(k => Math.round(months[k].revenue)), backgroundColor: '#6C63FF', borderColor: '#8b84ff', borderWidth: 1 },
-            { label: 'Прибыль', data: mkeys.map(k => Math.round(months[k].profit)), backgroundColor: '#5DCAA5', borderColor: '#7de0c0', borderWidth: 1 }
-          ]
-        },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
-          scales: {
-            x: { ticks: { color: '#4a4a6a', font: { size: 11 } }, grid: { color: '#1e2030' } },
-            y: { ticks: { color: '#4a4a6a', font: { size: 11 } }, grid: { color: '#1e2030' } }
-          }
+      if (charts.lines) charts.lines.destroy();
+      const { mkeys, mlabels, lines } = buildMonthlyLines();
+      if (mkeys.length) {
+        const products = Object.keys(lines);
+        const datasets = products.map((name, i) => ({
+          label: name,
+          data: lines[name],
+          borderColor: CHART_COLORS[i % CHART_COLORS.length],
+          backgroundColor: CHART_COLORS[i % CHART_COLORS.length] + '18',
+          borderWidth: 2.5,
+          pointRadius: 4,
+          pointHoverRadius: 7,
+          pointBackgroundColor: CHART_COLORS[i % CHART_COLORS.length],
+          pointBorderColor: '#0f1117',
+          pointBorderWidth: 1.5,
+          tension: 0.35,
+          fill: false,
+        }));
+
+        const leg = document.getElementById('lines-legend');
+        if (leg) {
+          leg.innerHTML = products.map((name, i) =>
+            `<span style="display:flex;align-items:center;gap:5px;cursor:pointer" onclick="toggleLine(${i})">
+              <span id="leg-dot-${i}" style="width:28px;height:3px;background:${CHART_COLORS[i%CHART_COLORS.length]};border-radius:2px;display:inline-block"></span>
+              <span id="leg-txt-${i}" style="color:var(--text2);font-size:12px">${name.length>16?name.slice(0,16)+'…':name}</span>
+            </span>`
+          ).join('');
         }
-      });
-    }
-  }
 
-  if (perProd.length) {
-    const el = document.getElementById('chart-products');
-    if (el) {
-      charts.products = new Chart(el, {
+        charts.lines = new Chart(el, {
+          type: 'line',
+          data: { labels: mlabels, datasets },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                backgroundColor: '#1a1d27', borderColor: '#2a2d3e', borderWidth: 1,
+                titleColor: '#e0e0ff', bodyColor: '#c0c0e0', padding: 10,
+                callbacks: {
+                  label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString('ru-RU')} ₽`
+                }
+              }
+            },
+            scales: {
+              x: { ticks: { color: '#4a4a6a', font: { size: 11 } }, grid: { color: '#1e2030' } },
+              y: { ticks: { color: '#4a4a6a', font: { size: 11 }, callback: v => fmt(v) + ' ₽' }, grid: { color: '#1e2030' } }
+            }
+          }
+        });
+      } else {
+        const leg = document.getElementById('lines-legend');
+        if (leg) leg.innerHTML = '<span style="color:var(--text5)">Нет данных о продажах</span>';
+      }
+    }
+
+    // ── This month profit by day ───────────────────────────────────
+    const el2 = document.getElementById('chart-month');
+    if (el2) {
+      if (charts.month) charts.month.destroy();
+      const now = new Date();
+      const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+      const dayLabels = Array.from({length: daysInMonth}, (_,i) => String(i+1));
+      const dayData = Array(daysInMonth).fill(0);
+      let monthTotal = 0;
+
+      S.sales.forEach(s => {
+        const d = new Date(s.date);
+        if (d.getFullYear() !== now.getFullYear() || d.getMonth() !== now.getMonth()) return;
+        const lots = S.purchases.filter(p => p.name === s.name && p.status === 'warehouse');
+        const tq = lots.reduce((a,p) => a+p.qty, 0);
+        const tc = lots.reduce((a,p) => a+calcP(p).totalRub, 0);
+        const pu = tq > 0 ? tc/tq : 0;
+        const rev = s.qty * s.price;
+        const comm = rev * (s.commission||0) / 100;
+        const prof = rev - comm - s.qty * pu;
+        dayData[d.getDate()-1] += prof;
+        monthTotal += prof;
+      });
+
+      const lbl = document.getElementById('month-total-label');
+      if (lbl) lbl.textContent = (monthTotal >= 0 ? '+' : '') + fmt(monthTotal) + ' ₽';
+
+      charts.month = new Chart(el2, {
         type: 'bar',
         data: {
-          labels: perProd.map(p => p.name.length > 20 ? p.name.slice(0, 20) + '…' : p.name),
+          labels: dayLabels,
           datasets: [{
-            label: 'Прибыль (₽)',
-            data: perProd.map(p => Math.round(p.profit)),
-            backgroundColor: perProd.map(p => p.profit >= 0 ? '#5DCAA5' : '#E24B4A'),
-            borderColor: perProd.map(p => p.profit >= 0 ? '#7de0c0' : '#ff6b6b'),
-            borderWidth: 1
+            label: 'Прибыль',
+            data: dayData.map(v => Math.round(v)),
+            backgroundColor: dayData.map(v => v >= 0 ? '#5DCAA580' : '#E24B4A80'),
+            borderColor: dayData.map(v => v >= 0 ? '#5DCAA5' : '#E24B4A'),
+            borderWidth: 1,
+            borderRadius: 3,
           }]
         },
         options: {
-          indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#1a1d27', borderColor: '#2a2d3e', borderWidth: 1,
+              titleColor: '#e0e0ff', bodyColor: '#c0c0e0',
+              callbacks: { label: ctx => ` ${ctx.parsed.y.toLocaleString('ru-RU')} ₽` }
+            }
+          },
           scales: {
-            x: { ticks: { color: '#4a4a6a', font: { size: 11 } }, grid: { color: '#1e2030' } },
-            y: { ticks: { color: '#c0c0e0', font: { size: 11 } }, grid: { color: '#1e2030' } }
+            x: { ticks: { color: '#4a4a6a', font: { size: 10 }, maxRotation: 0 }, grid: { display: false } },
+            y: { ticks: { color: '#4a4a6a', font: { size: 11 }, callback: v => fmt(v) }, grid: { color: '#1e2030' } }
           }
         }
       });
     }
-  }
+  });
+}
+
+function toggleLine(idx) {
+  if (!charts.lines) return;
+  const meta = charts.lines.getDatasetMeta(idx);
+  meta.hidden = !meta.hidden;
+  charts.lines.update();
+  const dot = document.getElementById('leg-dot-' + idx);
+  const txt = document.getElementById('leg-txt-' + idx);
+  if (dot) dot.style.opacity = meta.hidden ? '0.3' : '1';
+  if (txt) txt.style.opacity = meta.hidden ? '0.4' : '1';
 }
 
 // ─── Form fields binding (called on every render, safe — only inputs/selects) ─
@@ -1124,6 +1449,23 @@ function initClickHandler() {
       if (!confirm('Удалить продажу?')) return;
       S.sales = S.sales.filter(s => s.id !== id);
       saveState(); render();
+    } else if (action === 'aperiod') {
+      aState.period = btn.dataset.val;
+      if (aState.period !== 'custom') { aState.dateFrom = ''; aState.dateTo = ''; }
+      render();
+    } else if (action === 'amode') {
+      aState.mode = btn.dataset.val;
+      render();
+    } else if (action === 'alinemetric') {
+      aState.lineMetric = btn.dataset.val;
+      aState.mode = 'lines';
+      render();
+    } else if (action === 'aapply') {
+      const f = document.getElementById('a-from');
+      const t = document.getElementById('a-to');
+      if (f) aState.dateFrom = f.value;
+      if (t) aState.dateTo = t.value;
+      render();
     }
   });
 }
