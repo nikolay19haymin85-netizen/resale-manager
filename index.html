@@ -3,12 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#0f1117">
+<meta name="theme-color" content="#6C63FF">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ResaleManager">
+<meta name="mobile-web-app-capable" content="yes">
 <title>ResaleManager</title>
-<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" sizes="180x180" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAAi5KvYAAAACXBIWXMAAAsTAAALEwEAmpwYAAAF8WlUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPD94cGFja2V0IGJlZ2luPSLvu78iIGlkPSJXNU0wTXBDZWhpSHpyZVN6TlRjemtjOWQiPz4gPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iQWRvYmUgWE1QIENvcmUgNS42LWMxNDUgNzkuMTYzNDk5LCAyMDE4LzA4LzEzLTE2OjQwOjIyICAgICAgICAiPiA8cmRmOlJERiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPiA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtbG5zOnhtcE1NPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvbW0vIiB4bWxuczpzdEV2dD0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL3NUeXBlL1Jlc291cmNlRXZlbnQjIiB4bWxuczpwaG90b3Nob3A9Imh0dHA6Ly9ucy5hZG9iZS5jb20vcGhvdG9zaG9wLzEuMC8iIHhtbG5zOmRjPSJodHRwOi8vcHVybC5vcmcvZGMvZWxlbWVudHMvMS4xLyIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ0MgMjAxOSAoTWFjaW50b3NoKSIgeG1wOkNyZWF0ZURhdGU9IjIwMjQtMDEtMDFUMDA6MDA6MDAiIHhtcDpNb2RpZnlEYXRlPSIyMDI0LTAxLTAxVDAwOjAwOjAwIiB4bXA6TWV0YWRhdGFEYXRlPSIyMDI0LTAxLTAxVDAwOjAwOjAwIiB4bXBNTTpJbnN0YW5jZUlEPSJ4bXAuaWlkOjEiIHhtcE1NOkRvY3VtZW50SUQ9InhtcC5kaWQ6MSIgeG1wTU06T3JpZ2luYWxEb2N1bWVudElEPSJ4bXAuZGlkOjEiIHBob3Rvc2hvcDpDb2xvck1vZGU9IjMiIGRjOmZvcm1hdD0iaW1hZ2UvcG5nIj4gPHhtcE1NOkhpc3Rvcnk+IDxyZGY6U2VxPiA8cmRmOmxpIHN0RXZ0OmFjdGlvbj0iY3JlYXRlZCIgc3RFdnQ6aW5zdGFuY2VJRD0ieG1wLmlpZDoxIiBzdEV2dDp3aGVuPSIyMDI0LTAxLTAxVDAwOjAwOjAwIiBzdEV2dDpzb2Z0d2FyZUFnZW50PSJBZG9iZSBQaG90b3Nob3AgQ0MgMjAxOSAoTWFjaW50b3NoKSIvPiA8L3JkZjpTZXE+IDwveG1wTU06SGlzdG9yeT4gPC9yZGY6RGVzY3JpcHRpb24+IDwvcmRmOlJERj4gPC94OnhtcG1ldGE+IDw/eHBhY2tldCBlbmQ9InIiPz4B//79AAAAA0lEQVQI12NgAAIABQAABjAB8QAAAAlwSFlzAAALEwAACxMBAJqcGAAAAA1JREFUCNdjYGBg+A8AAQQAAc+H3JUAAAAASUVORK5CYII=">
 <style>
   :root {
     --bg: #0f1117;
@@ -285,6 +286,9 @@
   /* ── Chart wrapper ── */
   .chart-wrap { position: relative; width: 100%; }
 
+  /* datalist dropdown hint */
+  input[list]::-webkit-calendar-picker-indicator { opacity: 0.4; cursor: pointer; }
+
   /* ── Toast ── */
   .toast {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
@@ -309,6 +313,7 @@
       </svg>
     </div>
     <span class="topbar-title">ResaleManager</span>
+    <div id="sync-dot" title="Подключение..." style="width:8px;height:8px;border-radius:50%;background:#EF9F27;flex-shrink:0;transition:background 0.3s"></div>
     <div class="rate-wrap">
       <span>¥ =</span>
       <input class="rate-inp" type="text" inputmode="decimal" id="rateInput" value="12.5">
@@ -329,6 +334,10 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- Firebase SDK -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/9.23.0/firebase-app-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/9.23.0/firebase-database-compat.min.js"></script>
+<!-- Chart.js -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -341,16 +350,89 @@ let charts = {};
 let pF = { name:'', qty:'', priceCny:'', deliveryCny:'', deliveryRub:'', extras:'', customRate:'', notes:'', batchId: null, batchName:'' };
 let sF = { name:'', qty:'', price:'', commission:'' };
 
+// ─── Firebase ────────────────────────────────────────────────────────────────
+const FB_CONFIG = {
+  apiKey: "AIzaSyB5YWyuIGuizUlCVkntQZScAKDkKKAJzcg",
+  authDomain: "resale-manager-31007.firebaseapp.com",
+  databaseURL: "https://resale-manager-31007-default-rtdb.firebaseio.com",
+  projectId: "resale-manager-31007",
+  storageBucket: "resale-manager-31007.firebasestorage.app",
+  messagingSenderId: "149973420556",
+  appId: "1:149973420556:web:cebe95a0daa736c7ca7c29"
+};
+
+let fbApp = null, fbDb = null, fbRef = null;
+let fbOnline = false;
+let saveTimer = null;
+
+function initFirebase() {
+  return new Promise((resolve) => {
+    if (typeof firebase === 'undefined') { resolve(false); return; }
+    try {
+      if (!firebase.apps.length) firebase.initializeApp(FB_CONFIG);
+      fbApp = firebase.app();
+      fbDb = firebase.database();
+      fbRef = fbDb.ref('resale/data');
+
+      // Listen realtime
+      fbRef.on('value', snap => {
+        const data = snap.val();
+        if (data) {
+          S = data;
+          if (!S.batches) S.batches = [];
+          if (!S.purchases) S.purchases = [];
+          if (!S.sales) S.sales = [];
+          if (!S.nextId) S.nextId = 1;
+          const ri = document.getElementById('rateInput');
+          if (ri) ri.value = S.rate;
+          render();
+        }
+      });
+
+      fbOnline = true;
+      updateSyncIndicator(true);
+      resolve(true);
+    } catch(e) {
+      console.warn('Firebase init failed:', e);
+      resolve(false);
+    }
+  });
+}
+
+function updateSyncIndicator(online) {
+  const el = document.getElementById('sync-dot');
+  if (!el) return;
+  el.style.background = online ? '#5DCAA5' : '#EF9F27';
+  el.title = online ? 'Синхронизация активна' : 'Офлайн — данные сохраняются локально';
+}
+
 // ─── Persist ─────────────────────────────────────────────────────────────────
 function loadState() {
   try {
     const d = localStorage.getItem('rm_app');
     if (d) S = JSON.parse(d);
-    document.getElementById('rateInput').value = S.rate;
+    if (!S.batches) S.batches = [];
+    if (!S.purchases) S.purchases = [];
+    if (!S.sales) S.sales = [];
+    if (!S.nextId) S.nextId = 1;
+    const ri = document.getElementById('rateInput');
+    if (ri) ri.value = S.rate;
   } catch(e) {}
 }
+
 function saveState() {
+  // Always save locally first
   try { localStorage.setItem('rm_app', JSON.stringify(S)); } catch(e) {}
+  // Debounced Firebase save
+  if (fbOnline && fbRef) {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      fbRef.set(S).catch(e => {
+        console.warn('Firebase save failed:', e);
+        updateSyncIndicator(false);
+      });
+    }, 400);
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -436,7 +518,7 @@ function render() {
   else if (curTab === 'warehouse') el.innerHTML = renderWarehouse();
   else if (curTab === 'sales') el.innerHTML = renderSales();
   else if (curTab === 'analytics') el.innerHTML = renderAnalytics();
-  bindEvents();
+  bindFormFields();
   if (curTab === 'analytics') renderCharts();
 }
 
@@ -690,6 +772,52 @@ function renderWarehouse() {
 }
 
 // ─── Sales ────────────────────────────────────────────────────────────────────
+// ─── Live sale preview (no full re-render needed) ────────────────────────────
+function updateSalePreview() {
+  // Sync form state from DOM
+  ['sf-name','sf-qty','sf-price','sf-comm'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const key = {'sf-name':'name','sf-qty':'qty','sf-price':'price','sf-comm':'commission'}[id];
+    sF[key] = el.value;
+  });
+
+  const qty = nv(sF.qty, 1) || 1;
+  const price = nv(sF.price);
+  const commission = nv(sF.commission);
+  const rev = qty * price;
+  const commAmt = rev * commission / 100;
+
+  // Update commission sum field
+  const commSumEl = document.querySelector('.inp.readonly');
+  if (commSumEl) commSumEl.value = commAmt > 0 ? fmt(commAmt) + ' ₽' : '';
+
+  // Update preview box
+  const prevEl = document.getElementById('sale-preview');
+  if (!prevEl) return;
+
+  if (!sF.name || !price) { prevEl.innerHTML = ''; return; }
+  const lots = S.purchases.filter(p => p.name === sF.name && p.status === 'warehouse');
+  if (!lots.length) { prevEl.innerHTML = ''; return; }
+
+  const tq = lots.reduce((a, p) => a + p.qty, 0);
+  const tc = lots.reduce((a, p) => a + calcP(p).totalRub, 0);
+  const pu = tq > 0 ? tc / tq : 0;
+  const cost = qty * pu;
+  const prof = rev - commAmt - cost;
+  const margin = rev > 0 ? (prof / rev * 100).toFixed(1) : 0;
+  const roi = cost > 0 ? (prof / cost * 100).toFixed(1) : 0;
+
+  prevEl.innerHTML = `<div class="cbox">
+    <div class="crow"><span>Выручка</span><span class="acc">${fmt(rev)} ₽</span></div>
+    <div class="crow"><span>Комиссия МП (${commission}%)</span><span style="color:var(--red)">−${fmt(commAmt)} ₽</span></div>
+    <div class="crow"><span>Себестоимость</span><span style="color:var(--text4)">−${fmt(cost)} ₽</span></div>
+    <div class="crow tot"><span>Прибыль</span><span class="${prof >= 0 ? 'pp' : 'np'}">${prof >= 0 ? '+' : ''}${fmt(prof)} ₽</span></div>
+    <div class="crow"><span>Маржа</span><span class="${prof >= 0 ? 'pp' : 'np'}">${margin}%</span></div>
+    <div class="crow"><span>ROI</span><span class="${prof >= 0 ? 'pp' : 'np'}">${roi}%</span></div>
+  </div>`;
+}
+
 function renderSales() {
   const products = getProductNames();
   const qty = nv(sF.qty, 1) || 1;
@@ -698,37 +826,19 @@ function renderSales() {
   const rev = qty * price;
   const commAmt = rev * commission / 100;
 
-  let prevHtml = '';
-  if (sF.name && price) {
-    const lots = S.purchases.filter(p => p.name === sF.name && p.status === 'warehouse');
-    if (lots.length) {
-      const tq = lots.reduce((a, p) => a + p.qty, 0);
-      const tc = lots.reduce((a, p) => a + calcP(p).totalRub, 0);
-      const pu = tq > 0 ? tc / tq : 0;
-      const cost = qty * pu;
-      const prof = rev - commAmt - cost;
-      const margin = rev > 0 ? (prof / rev * 100).toFixed(1) : 0;
-      const roi = cost > 0 ? (prof / cost * 100).toFixed(1) : 0;
-      prevHtml = `<div class="cbox">
-        <div class="crow"><span>Выручка</span><span class="acc">${fmt(rev)} ₽</span></div>
-        <div class="crow"><span>Комиссия МП (${commission}%)</span><span style="color:var(--red)">−${fmt(commAmt)} ₽</span></div>
-        <div class="crow"><span>Себестоимость</span><span style="color:var(--text4)">−${fmt(cost)} ₽</span></div>
-        <div class="crow tot"><span>Прибыль</span><span class="${prof >= 0 ? 'pp' : 'np'}">${prof >= 0 ? '+' : ''}${fmt(prof)} ₽</span></div>
-        <div class="crow"><span>Маржа</span><span class="${prof >= 0 ? 'pp' : 'np'}">${margin}%</span></div>
-        <div class="crow"><span>ROI</span><span class="${prof >= 0 ? 'pp' : 'np'}">${roi}%</span></div>
-      </div>`;
-    }
-  }
+  // preview rendered live via updateSalePreview()
 
   return `
   <div class="card">
     <div class="card-title">Зафиксировать продажу</div>
+    <datalist id="sf-products-list">
+      ${products.map(n => `<option value="${n}"></option>`).join('')}
+    </datalist>
     <div class="fg" style="margin-bottom:10px">
-      <label>Товар</label>
-      <select class="sel" id="sf-name">
-        <option value="">— Выберите товар —</option>
-        ${products.map(n => `<option ${sF.name === n ? 'selected' : ''}>${n}</option>`).join('')}
-      </select>
+      <label>Товар <span style="color:var(--text4);font-size:10px">— вписывай или выбери из списка</span></label>
+      <input class="inp" type="text" list="sf-products-list" id="sf-name"
+        placeholder="Начни вводить название..." value="${sF.name}"
+        autocomplete="off">
     </div>
     <div class="fr2">
       <div class="fg"><label>Количество</label>
@@ -742,7 +852,7 @@ function renderSales() {
       <div class="fg"><label>Сумма комиссии</label>
         <input class="inp readonly" readonly value="${commAmt > 0 ? fmt(commAmt) + ' ₽' : ''}"></div>
     </div>
-    ${prevHtml}
+    <div id="sale-preview"></div>
     <button class="btn p full" data-action="add-sale">Записать продажу</button>
   </div>
 
@@ -931,11 +1041,9 @@ function renderCharts() {
   }
 }
 
-// ─── Event binding ────────────────────────────────────────────────────────────
-function bindEvents() {
-  const el = document.getElementById('content');
-
-  // Sync purchase form fields on blur (не на каждый символ!)
+// ─── Form fields binding (called on every render, safe — only inputs/selects) ─
+function bindFormFields() {
+  // Purchase form
   const pfBinds = [
     ['pf-name', 'name'], ['pf-qty', 'qty'], ['pf-price', 'priceCny'],
     ['pf-rate', 'customRate'], ['pf-dcny', 'deliveryCny'], ['pf-drub', 'deliveryRub'],
@@ -945,12 +1053,10 @@ function bindEvents() {
     const inp = document.getElementById(id);
     if (!inp) return;
     inp.addEventListener('blur', () => { pF[key] = inp.value; });
-    // Recalc on change for numeric fields
     if (['pf-qty','pf-price','pf-rate','pf-dcny','pf-drub','pf-extras'].includes(id)) {
       inp.addEventListener('input', () => { pF[key] = inp.value; updatePurchaseCalc(); });
     }
   });
-
   const pfBatch = document.getElementById('pf-batch');
   if (pfBatch) {
     pfBatch.addEventListener('change', () => {
@@ -959,21 +1065,33 @@ function bindEvents() {
       if (bnw) bnw.style.visibility = pF.batchId ? 'hidden' : '';
     });
   }
-
-  // Sync sale form fields
-  const sfBinds = [['sf-name', 'name'], ['sf-qty', 'qty'], ['sf-price', 'price'], ['sf-comm', 'commission']];
+  // Sales form — all plain inputs now, recalc on every keystroke
+  const sfBinds = [
+    ['sf-name', 'name'],
+    ['sf-qty', 'qty'],
+    ['sf-price', 'price'],
+    ['sf-comm', 'commission']
+  ];
   sfBinds.forEach(([id, key]) => {
     const inp = document.getElementById(id);
     if (!inp) return;
-    const isSelect = inp.tagName === 'SELECT';
-    inp.addEventListener(isSelect ? 'change' : 'input', () => {
+    // input fires on every char; change fires when picking from datalist
+    inp.addEventListener('input', () => {
       sF[key] = inp.value;
-      if (['sf-qty', 'sf-price', 'sf-comm', 'sf-name'].includes(id)) render();
+      updateSalePreview();
+    });
+    inp.addEventListener('change', () => {
+      sF[key] = inp.value;
+      updateSalePreview();
     });
   });
+  // Initial preview draw after render
+  updateSalePreview();
+}
 
-  // Delegated clicks
-  el.addEventListener('click', e => {
+// ─── Single delegated click listener — attached ONCE at init ─────────────────
+function initClickHandler() {
+  document.getElementById('content').addEventListener('click', e => {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
     e.stopPropagation();
@@ -981,36 +1099,28 @@ function bindEvents() {
     const id = btn.dataset.id ? parseInt(btn.dataset.id) : null;
 
     if (action === 'toggle-batch') {
-      // sync form first
       syncPurchaseForm();
       openBatches[id] = !openBatches[id];
       render();
-    }
-    else if (action === 'add-item') {
+    } else if (action === 'add-item') {
       syncPurchaseForm();
       addItem(btn.dataset.status);
-    }
-    else if (action === 'receive-item') {
+    } else if (action === 'receive-item') {
       receiveItem(id);
-    }
-    else if (action === 'receive-batch') {
+    } else if (action === 'receive-batch') {
       receiveBatch(id);
-    }
-    else if (action === 'del-item') {
+    } else if (action === 'del-item') {
       if (!confirm('Удалить товар?')) return;
       S.purchases = S.purchases.filter(p => p.id !== id);
       saveState(); render();
-    }
-    else if (action === 'del-batch') {
+    } else if (action === 'del-batch') {
       if (!confirm('Удалить всю партию и товары в ней?')) return;
       S.batches = (S.batches || []).filter(b => b.id !== id);
       S.purchases = S.purchases.filter(p => p.batchId !== id);
       saveState(); render();
-    }
-    else if (action === 'add-sale') {
+    } else if (action === 'add-sale') {
       addSale();
-    }
-    else if (action === 'del-sale') {
+    } else if (action === 'del-sale') {
       if (!confirm('Удалить продажу?')) return;
       S.sales = S.sales.filter(s => s.id !== id);
       saveState(); render();
@@ -1093,7 +1203,10 @@ function receiveBatch(batchId) {
 }
 
 function addSale() {
-  if (!sF.name) { toast('Выберите товар'); return; }
+  // Sync from DOM in case user hasn't blurred
+  const nameEl = document.getElementById('sf-name');
+  if (nameEl) sF.name = nameEl.value.trim();
+  if (!sF.name) { toast('Укажите название товара'); return; }
   const qty = nv(sF.qty, 1) || 1;
   const price = nv(sF.price);
   const commission = nv(sF.commission);
@@ -1109,7 +1222,109 @@ function addSale() {
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 loadState();
+initClickHandler();
 render();
+// Init Firebase after first render
+initFirebase();
 </script>
+
+<!-- PWA Install Banner -->
+<div id="pwa-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#1a1d27;border-top:0.5px solid #6C63FF;padding:14px 16px;z-index:9999;max-width:900px;margin:0 auto">
+  <div style="display:flex;align-items:center;gap:12px">
+    <div style="width:44px;height:44px;background:#6C63FF;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <svg width="22" height="22" viewBox="0 0 16 16" fill="white"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>
+    </div>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:14px;font-weight:600;color:#e0e0ff">Установить приложение</div>
+      <div id="pwa-hint" style="font-size:12px;color:#5a5a7a;margin-top:2px"></div>
+    </div>
+    <button id="pwa-install-btn" style="display:none;padding:8px 14px;background:#6C63FF;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;flex-shrink:0">Установить</button>
+    <button onclick="document.getElementById('pwa-banner').style.display='none';localStorage.setItem('pwa-dismissed','1')" style="padding:6px 10px;background:transparent;color:#4a4a6a;border:0.5px solid #2a2d3e;border-radius:8px;font-size:13px;cursor:pointer;font-family:inherit;flex-shrink:0">✕</button>
+  </div>
+</div>
+
+<script>
+(function() {
+  if (localStorage.getItem('pwa-dismissed')) return;
+  if (window.matchMedia('(display-mode: standalone)').matches) return;
+  if (navigator.standalone) return;
+
+  const banner = document.getElementById('pwa-banner');
+  const hint = document.getElementById('pwa-hint');
+  const installBtn = document.getElementById('pwa-install-btn');
+
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) && !window.MSStream;
+  const isAndroid = /Android/.test(navigator.userAgent);
+  const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
+
+  if (isIOS && isSafari) {
+    hint.innerHTML = 'Нажми <b style="color:#6C63FF">Поделиться</b> → <b style="color:#6C63FF">На экран Домой</b>';
+    setTimeout(() => banner.style.display = 'block', 1500);
+  } else if (isIOS && !isSafari) {
+    hint.innerHTML = 'Открой в <b style="color:#6C63FF">Safari</b> для установки на экран';
+    setTimeout(() => banner.style.display = 'block', 1500);
+  }
+
+  let deferredPrompt;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    hint.textContent = 'Добавить на главный экран';
+    installBtn.style.display = 'block';
+    banner.style.display = 'block';
+  });
+
+  installBtn.addEventListener('click', async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') banner.style.display = 'none';
+    deferredPrompt = null;
+  });
+
+  window.addEventListener('appinstalled', () => {
+    banner.style.display = 'none';
+  });
+})();
+
+// Service Worker (офлайн)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    const swCode = `
+      const CACHE_NAME = 'resale-v2';
+      self.addEventListener('install', e => {
+        self.skipWaiting();
+      });
+      self.addEventListener('activate', e => {
+        e.waitUntil(
+          caches.keys().then(keys => Promise.all(
+            keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
+          )).then(() => clients.claim())
+        );
+      });
+      self.addEventListener('fetch', e => {
+        if (e.request.method !== 'GET') return;
+        e.respondWith(
+          caches.open(CACHE_NAME).then(cache =>
+            cache.match(e.request).then(cached => {
+              const fresh = fetch(e.request).then(res => {
+                if (res.ok) cache.put(e.request, res.clone());
+                return res;
+              }).catch(() => cached);
+              return cached || fresh;
+            })
+          )
+        );
+      });
+    `;
+    try {
+      const swBlob = new Blob([swCode], {type: 'application/javascript'});
+      const swURL = URL.createObjectURL(swBlob);
+      navigator.serviceWorker.register(swURL, {scope: './'}).catch(() => {});
+    } catch(e) {}
+  });
+}
+</script>
+
 </body>
 </html>
