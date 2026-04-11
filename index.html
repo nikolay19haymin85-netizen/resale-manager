@@ -349,7 +349,7 @@ let curTab = 'dashboard';
 let charts = {};
 
 // Forms (persistent across re-renders)
-let pF = { name:'', qty:'', priceCny:'', deliveryCny:'', deliveryRub:'', extras:'', customRate:'', notes:'', batchId: null, batchName:'', useSizes: false, sizes: [] };
+let pF = { name:'', qty:'', priceCny:'', deliveryCny:'', deliveryRub:'', extras:'', customRate:'', notes:'', batchId: null, batchName:'', useSizes: false, sizes: [], delivMode: 'total' }; // delivMode: 'total' = одна доставка на всю партию, 'per_item' = доставка за каждую штуку
 let sF = { name:'', qty:'', price:'', commission:'', size:'' };
 
 // ─── Firebase ────────────────────────────────────────────────────────────────
@@ -455,7 +455,9 @@ function calcP(p) {
   const qty = p.qty || 1;
   const baseCny = (p.priceCny || 0) * qty;
   const baseRub = baseCny * rate;
-  const delivRub = p.deliveryCny ? (p.deliveryCny * rate) : (p.deliveryRub || 0);
+  // delivMode: 'per_item' = доставка умножается на кол-во, 'total' = фиксированная на партию
+  const delivPerEntry = p.deliveryCny ? (p.deliveryCny * rate) : (p.deliveryRub || 0);
+  const delivRub = (p.delivMode === 'per_item') ? delivPerEntry * qty : delivPerEntry;
   const extras = p.extras || 0;
   const totalRub = baseRub + delivRub + extras;
   return { rate, baseCny, baseRub, delivRub, extras, totalRub, perUnit: qty > 0 ? totalRub / qty : 0 };
@@ -466,7 +468,8 @@ function calcForm(f) {
   const priceCny = nv(f.priceCny);
   const baseCny = priceCny * qty;
   const baseRub = baseCny * rate;
-  const delivRub = nv(f.deliveryCny) ? (nv(f.deliveryCny) * rate) : nv(f.deliveryRub);
+  const delivPerEntry = nv(f.deliveryCny) ? (nv(f.deliveryCny) * rate) : nv(f.deliveryRub);
+  const delivRub = (f.delivMode === 'per_item') ? delivPerEntry * qty : delivPerEntry;
   const extras = nv(f.extras);
   const totalRub = baseRub + delivRub + extras;
   return { rate, qty, priceCny, baseCny, baseRub, delivRub, extras, totalRub, perUnit: qty > 0 ? totalRub / qty : 0 };
@@ -726,21 +729,37 @@ function renderPurchase() {
         <input class="inp" type="text" inputmode="decimal" placeholder="0" id="pf-drub" value="${pF.deliveryRub}"></div>
     </div>
 
-    <!-- Delivery info hint -->
+    <!-- Delivery mode selector -->
     ${(() => {
       const qty = nv(pF.qty, 1) || 1;
       const rate = nv(pF.customRate) || S.rate;
-      const delivRub = nv(pF.deliveryCny) ? nv(pF.deliveryCny) * rate : nv(pF.deliveryRub);
-      const priceCny = nv(pF.priceCny);
-      if (delivRub > 0 && priceCny > 0) {
-        const basePerUnit = priceCny * rate;
-        const totalPerUnit = basePerUnit + delivRub / qty;
-        return `<div style="padding:8px 12px;background:var(--surface2);border-radius:8px;border:0.5px solid var(--border);margin-bottom:10px;font-size:12px;color:var(--text4)">
-          <div style="margin-bottom:4px">Товар <b style="color:var(--text2)">${fmt(basePerUnit)} ₽</b> + доставка <b style="color:var(--text2)">${fmt(delivRub)} ₽</b> на партию</div>
-          <div>Итого с доставкой: <b style="color:var(--purple-light);font-size:13px">${fmt(basePerUnit + delivRub)} ₽</b> за всю партию · <b style="color:var(--purple-light)">${fmt(totalPerUnit)} ₽/шт.</b> в среднем</div>
-        </div>`;
-      }
-      return '';
+      const delivEntry = nv(pF.deliveryCny) ? nv(pF.deliveryCny) * rate : nv(pF.deliveryRub);
+      if (delivEntry <= 0) return '';
+      const isPerItem = pF.delivMode === 'per_item';
+      const delivTotal = isPerItem ? delivEntry * qty : delivEntry;
+      const delivPerUnit = isPerItem ? delivEntry : delivEntry / qty;
+      const basePerUnit = nv(pF.priceCny) * rate;
+      return `<div style="margin-bottom:10px">
+        <div style="font-size:11px;color:var(--text4);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">Режим доставки</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <button class="btn${!isPerItem ? ' p' : ''}" data-action="deliv-mode" data-mode="total"
+            style="padding:10px 12px;min-height:auto;display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left">
+            <span style="font-size:13px;font-weight:600">На всю партию</span>
+            <span style="font-size:11px;opacity:0.75">${fmt(delivEntry)} ₽ × 1 = <b>${fmt(delivEntry)} ₽</b></span>
+            <span style="font-size:11px;opacity:0.6">~${fmt(delivEntry/qty)} ₽/шт. в среднем</span>
+          </button>
+          <button class="btn${isPerItem ? ' p' : ''}" data-action="deliv-mode" data-mode="per_item"
+            style="padding:10px 12px;min-height:auto;display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left">
+            <span style="font-size:13px;font-weight:600">За каждую штуку</span>
+            <span style="font-size:11px;opacity:0.75">${fmt(delivEntry)} ₽ × ${qty} = <b>${fmt(delivEntry*qty)} ₽</b></span>
+            <span style="font-size:11px;opacity:0.6">${fmt(delivEntry)} ₽/шт. точно</span>
+          </button>
+        </div>
+        <div style="padding:8px 12px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--text4)">
+          Итого доставка: <b style="color:var(--purple-light)">${fmt(delivTotal)} ₽</b>
+          · Себест. с доставкой: <b style="color:var(--purple-light)">${fmt(basePerUnit + delivPerUnit)} ₽/шт.</b>
+        </div>
+      </div>`;
     })()}
 
     <div class="fr2">
@@ -822,7 +841,7 @@ function renderBatchList() {
             <div style="display:flex;align-items:flex-start;gap:10px;width:100%">
               <div style="flex:1;min-width:0">
                 <div class="bi-name">${p.name}</div>
-                <div class="bi-sub">${p.qty} шт. · ¥${p.priceCny}/ед. · <span class="acc">${fmt(t.totalRub)} ₽</span></div>
+                <div class="bi-sub">${p.qty} шт. · ¥${p.priceCny}/ед. · <span class="acc">${fmt(t.totalRub)} ₽</span>${p.delivMode==='per_item'&&(p.deliveryCny||p.deliveryRub)?` · <span style="color:var(--purple-light);font-size:10px">дост. ×${p.qty}</span>`:''}</div>
                 <span class="badge ${stMap[p.status] || 'warehouse'}" style="margin-top:5px;display:inline-block">${stLbl[p.status] || p.status}</span>
                 ${p.sizes && p.sizes.length ? `<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px">${p.sizes.map(sz=>`<span style="font-size:11px;background:var(--surface2);color:var(--purple-light);border-radius:5px;padding:2px 7px">${sz.label}×${sz.qty}</span>`).join('')}</div>` : ''}
               </div>
@@ -1881,7 +1900,11 @@ function initClickHandler() {
       aState.mode = 'lines';
       render();
     } else if (action === 'split-delivery') {
-      // removed — delivery now adds to total automatically via calcForm
+      // removed
+    } else if (action === 'deliv-mode') {
+      syncPurchaseForm();
+      pF.delivMode = btn.dataset.mode;
+      render();
     } else if (action === 'aapply') {
       const f = document.getElementById('a-from');
       const t = document.getElementById('a-to');
@@ -1953,11 +1976,12 @@ function addItem(status) {
     deliveryCny: nv(pF.deliveryCny) || 0,
     deliveryRub: nv(pF.deliveryRub) || 0,
     extras: nv(pF.extras) || 0,
+    delivMode: pF.delivMode || 'total',
     notes: pF.notes, batchId, status, date: Date.now(),
     totalRub: t.totalRub, perUnit: t.perUnit,
     sizes: cleanSizes
   });
-  pF = { name: '', qty: '', priceCny: '', deliveryCny: '', deliveryRub: '', extras: '', customRate: '', notes: '', batchId, batchName: pF.batchName, useSizes: pF.useSizes, sizes: pF.useSizes ? [{ label:'', qty:'' }] : [] };
+  pF = { name: '', qty: '', priceCny: '', deliveryCny: '', deliveryRub: '', extras: '', customRate: '', notes: '', batchId, batchName: pF.batchName, useSizes: pF.useSizes, sizes: pF.useSizes ? [{ label:'', qty:'' }] : [], delivMode: pF.delivMode || 'total' };
   saveState();
   toast(status === 'pending' ? 'Добавлено в ожидание' : 'Добавлено на склад');
   render();
