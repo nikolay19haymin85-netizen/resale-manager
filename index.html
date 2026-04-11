@@ -838,7 +838,7 @@ function renderBatchList() {
             </div>
             ${isEditing ? `
             <div style="margin-top:10px;padding:12px;background:var(--surface2);border-radius:9px;border:0.5px solid var(--accent)">
-              <div style="font-size:11px;color:var(--purple-light);margin-bottom:8px;font-weight:600">РЕДАКТИРОВАНИЕ</div>
+              <div style="font-size:11px;color:var(--purple-light);margin-bottom:10px;font-weight:600">РЕДАКТИРОВАНИЕ</div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
                 <div class="fg"><label>Название</label>
                   <input class="inp" type="text" id="ei-name" value="${p.name}" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
@@ -848,9 +848,19 @@ function renderBatchList() {
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
                 <div class="fg"><label>Цена (¥/ед.)</label>
                   <input class="inp" type="text" inputmode="decimal" id="ei-price" value="${p.priceCny}" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
-                <div class="fg"><label>Заметки</label>
-                  <input class="inp" type="text" id="ei-notes" value="${p.notes||''}" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
+                <div class="fg"><label>Свой курс ¥</label>
+                  <input class="inp" type="text" inputmode="decimal" id="ei-rate" value="${p.customRate||''}" placeholder="${S.rate}" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
               </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+                <div class="fg"><label>Доставка (¥)</label>
+                  <input class="inp" type="text" inputmode="decimal" id="ei-dcny" value="${p.deliveryCny||''}" placeholder="0" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
+                <div class="fg"><label>Доставка (₽)</label>
+                  <input class="inp" type="text" inputmode="decimal" id="ei-drub" value="${p.deliveryRub||''}" placeholder="0" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
+                <div class="fg"><label>Прочие расходы (₽)</label>
+                  <input class="inp" type="text" inputmode="decimal" id="ei-extras" value="${p.extras||''}" placeholder="0" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
+              </div>
+              <div class="fg" style="margin-bottom:8px"><label>Заметки</label>
+                <input class="inp" type="text" id="ei-notes" value="${p.notes||''}" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
               <div style="display:flex;gap:8px">
                 <button class="btn p" data-action="save-edit" data-id="${p.id}" style="flex:1;min-height:40px;font-size:13px">Сохранить</button>
                 <button class="btn" data-action="cancel-edit" style="min-height:40px;padding:0 14px;font-size:13px">Отмена</button>
@@ -935,7 +945,11 @@ function renderWarehouse() {
                   `<span style="font-size:11px;padding:2px 7px;border-radius:5px;background:${qty>0?'#0d2018':'#1a1a2e'};color:${qty>0?'var(--green)':'var(--text5)'};font-weight:600">${lbl}: ${qty}</span>`
                 ).join('')}
               </div>` : `<span style="font-size:13px;color:${item.remaining>0?'var(--green)':'var(--text5)'};font-weight:600">${item.remaining} шт.</span>`}
-              <span style="font-size:12px;color:var(--text4);margin-left:8px"><b class="acc">${fmt(item.perUnit)} ₽</b>/шт.</span>
+              <div style="text-align:right;margin-left:10px;flex-shrink:0">
+                <div style="font-size:11px;color:var(--text4)">Себест.</div>
+                <div class="acc" style="font-size:13px;font-weight:600">${fmt(item.perUnit)} ₽/шт.</div>
+                <div style="font-size:11px;color:var(--text4);margin-top:2px">Закупка ¥${fmtf(item.origQty>0?item.cost/(item.perUnit>0?1:1)/S.rate:0,1)}</div>
+              </div>
             </div>
             ${hasSizes && szOpen ? `<div style="margin-top:8px;margin-left:20px">
               <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -1082,7 +1096,7 @@ function renderSales() {
     <div class="card-title">История продаж</div>
     ${!S.sales.length ? '<div class="empty">Продаж пока нет</div>' : `
     <div class="tw"><table>
-      <thead><tr><th>Дата</th><th>Товар</th><th>Шт.</th><th>Выручка</th><th>Комис.</th><th>Прибыль</th><th>Маржа</th><th></th></tr></thead>
+      <thead><tr><th>Дата</th><th>Товар</th><th>Шт.</th><th>Выручка</th><th>Комис.</th><th>Прибыль</th><th>Маржа</th><th>ROI</th><th></th></tr></thead>
       <tbody>${[...S.sales].reverse().map(s => {
         const lots = S.purchases.filter(p => p.name === s.name && p.status === 'warehouse');
         const tq = lots.reduce((a, p) => a + p.qty, 0);
@@ -1092,6 +1106,7 @@ function renderSales() {
         const comm = rev * (s.commission || 0) / 100;
         const prof = rev - comm - s.qty * pu;
         const margin = rev > 0 ? (prof / rev * 100).toFixed(1) : 0;
+        const roi = (s.qty * pu) > 0 ? (prof / (s.qty * pu) * 100).toFixed(1) : 0;
         const isEditingSale = editingSaleId === s.id;
         const availSz = getAvailableSizes(s.name);
         return `<tr>
@@ -1102,6 +1117,7 @@ function renderSales() {
           <td style="color:var(--text4)">${fmt(comm)} ₽${s.commission ? ` (${s.commission}%)` : ''}</td>
           <td class="${prof >= 0 ? 'pp' : 'np'}">${prof >= 0 ? '+' : ''}${fmt(prof)} ₽</td>
           <td class="${prof >= 0 ? 'pp' : 'np'}">${margin}%</td>
+          <td class="${prof >= 0 ? 'pp' : 'np'}">${roi}%</td>
           <td style="white-space:nowrap">
             <button class="btn" data-action="edit-sale" data-id="${s.id}" style="font-size:11px;padding:4px 8px;min-height:30px;color:var(--amber);margin-right:4px">✏</button>
             <button class="btn d" data-action="del-sale" data-id="${s.id}" style="min-height:30px">✕</button>
@@ -1656,9 +1672,8 @@ function bindFormFields() {
       if (bnw) bnw.style.visibility = pF.batchId ? 'hidden' : '';
     });
   }
-  // Sales form — all plain inputs now, recalc on every keystroke
+  // Sales form
   const sfBinds = [
-    ['sf-name', 'name'],
     ['sf-qty', 'qty'],
     ['sf-price', 'price'],
     ['sf-comm', 'commission']
@@ -1666,16 +1681,31 @@ function bindFormFields() {
   sfBinds.forEach(([id, key]) => {
     const inp = document.getElementById(id);
     if (!inp) return;
-    // input fires on every char; change fires when picking from datalist
-    inp.addEventListener('input', () => {
-      sF[key] = inp.value;
-      updateSalePreview();
-    });
-    inp.addEventListener('change', () => {
-      sF[key] = inp.value;
-      updateSalePreview();
-    });
+    inp.addEventListener('input', () => { sF[key] = inp.value; updateSalePreview(); });
+    inp.addEventListener('change', () => { sF[key] = inp.value; updateSalePreview(); });
   });
+  // sf-name: full re-render when product changes to refresh size buttons
+  const sfNameEl = document.getElementById('sf-name');
+  if (sfNameEl) {
+    sfNameEl.addEventListener('input', () => {
+      sF.name = sfNameEl.value;
+      sF.size = ''; // reset size when product changes
+      updateSalePreview();
+    });
+    // When user picks from datalist or leaves field — do full render to refresh sizes
+    sfNameEl.addEventListener('change', () => {
+      sF.name = sfNameEl.value.trim();
+      sF.size = '';
+      render();
+    });
+    sfNameEl.addEventListener('blur', () => {
+      if (sF.name !== sfNameEl.value.trim()) {
+        sF.name = sfNameEl.value.trim();
+        sF.size = '';
+        render();
+      }
+    });
+  }
   // Initial preview draw after render
   updateSalePreview();
 }
@@ -1734,14 +1764,22 @@ function initClickHandler() {
     } else if (action === 'save-edit') {
       const p = S.purchases.find(p => p.id === id);
       if (p) {
-        const nameEl = document.getElementById('ei-name');
-        const qtyEl  = document.getElementById('ei-qty');
-        const priceEl= document.getElementById('ei-price');
-        const notesEl= document.getElementById('ei-notes');
-        if (nameEl)  p.name     = nameEl.value.trim() || p.name;
-        if (qtyEl)   p.qty      = parseInt(qtyEl.value) || p.qty;
-        if (priceEl) p.priceCny = parseFloat(priceEl.value.replace(',','.')) || p.priceCny;
-        if (notesEl) p.notes    = notesEl.value;
+        const nameEl  = document.getElementById('ei-name');
+        const qtyEl   = document.getElementById('ei-qty');
+        const priceEl = document.getElementById('ei-price');
+        const rateEl  = document.getElementById('ei-rate');
+        const dcnyEl  = document.getElementById('ei-dcny');
+        const drubEl  = document.getElementById('ei-drub');
+        const extEl   = document.getElementById('ei-extras');
+        const notesEl = document.getElementById('ei-notes');
+        if (nameEl)  p.name       = nameEl.value.trim() || p.name;
+        if (qtyEl)   p.qty        = parseInt(qtyEl.value) || p.qty;
+        if (priceEl) p.priceCny   = parseFloat(priceEl.value.replace(',','.')) || p.priceCny;
+        if (rateEl && rateEl.value.trim())  p.customRate  = parseFloat(rateEl.value.replace(',','.')) || 0;
+        if (dcnyEl)  p.deliveryCny= parseFloat(dcnyEl.value.replace(',','.')) || 0;
+        if (drubEl)  p.deliveryRub= parseFloat(drubEl.value.replace(',','.')) || 0;
+        if (extEl)   p.extras     = parseFloat(extEl.value.replace(',','.')) || 0;
+        if (notesEl) p.notes      = notesEl.value;
         // Recalc cost
         const t = calcP(p);
         p.totalRub = t.totalRub;
@@ -1964,7 +2002,8 @@ function addSale() {
     toast('Недостаточно товара на складе'); return;
   }
   S.sales.push({ id: S.nextId++, name: sF.name, qty, price, commission, size: sF.size || '', date: Date.now() });
-  sF = { name: sF.name, qty: '', price: '', commission: sF.commission, size: sF.size };
+  // Reset name and size after sale so user can pick a different product
+  sF = { name: '', qty: '', price: '', commission: sF.commission, size: '' };
   saveState();
   toast('Продажа записана');
   render();
