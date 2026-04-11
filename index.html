@@ -343,6 +343,7 @@
 // ─── State ───────────────────────────────────────────────────────────────────
 let S = { rate: 12.5, purchases: [], sales: [], batches: [], nextId: 1 };
 let openBatches = {};
+let editingItemId = null;
 let curTab = 'dashboard';
 let charts = {};
 
@@ -660,23 +661,47 @@ function renderPurchase() {
     </div>
 
     ${pF.useSizes ? `
-    <!-- Sizes table -->
-    <div style="margin-bottom:10px">
-      <div style="font-size:11px;color:var(--text4);margin-bottom:6px">Размеры и количество</div>
-      <div id="sizes-rows">
-        ${sizeRows.map((sz, i) => `
-        <div style="display:grid;grid-template-columns:1fr 80px 36px;gap:6px;margin-bottom:6px" id="szrow-${i}">
-          <input class="inp" type="text" placeholder="XS, S, M, L, XL, 42..." value="${sz.label}"
-            style="font-size:13px;padding:8px 10px;min-height:40px"
-            onblur="pF.sizes[${i}]=pF.sizes[${i}]||{};pF.sizes[${i}].label=this.value">
-          <input class="inp" type="text" inputmode="numeric" placeholder="кол." value="${sz.qty}"
-            style="font-size:13px;padding:8px 10px;min-height:40px;text-align:center"
-            oninput="pF.sizes[${i}]=pF.sizes[${i}]||{};pF.sizes[${i}].qty=this.value;updatePurchaseCalc()">
-          <button class="btn d" style="min-height:40px;padding:0 10px;font-size:16px" data-action="del-size" data-idx="${i}">×</button>
-        </div>`).join('')}
+    <!-- Sizes tap UI -->
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--text4);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em">Быстрый выбор</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+        ${['XXS','XS','S','M','L','XL','XXL','3XL'].map(sz => {
+          const existing = pF.sizes ? pF.sizes.find(s => s.label === sz) : null;
+          const active = existing && parseInt(existing.qty) > 0;
+          return `<button class="btn${active ? ' p' : ''}" data-action="tap-size" data-sz="${sz}"
+            style="font-size:13px;padding:8px 14px;min-height:42px;position:relative">
+            ${sz}
+            ${active ? `<span style="position:absolute;top:-5px;right:-5px;width:18px;height:18px;background:#5DCAA5;border-radius:50%;font-size:10px;font-weight:700;color:#0f1117;display:flex;align-items:center;justify-content:center;line-height:1">${existing.qty}</span>` : ''}
+          </button>`;
+        }).join('')}
       </div>
-      <button class="btn" data-action="add-size" style="font-size:12px;padding:6px 14px;min-height:36px;width:100%;margin-top:2px">+ Добавить размер</button>
-      <div style="font-size:12px;color:var(--text4);margin-top:8px">Итого: <b style="color:var(--purple-light)">${pF.qty || 0} шт.</b></div>
+
+      ${(pF.sizes && pF.sizes.length > 0) ? `
+      <div style="font-size:11px;color:var(--text4);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em">Количество по размерам</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${pF.sizes.filter(sz => parseInt(sz.qty) > 0 || sz.label).map((sz, i) => `
+        <div style="display:flex;align-items:center;gap:8px;background:var(--surface2);border-radius:9px;padding:8px 12px;border:0.5px solid var(--border)">
+          <span style="font-weight:600;color:var(--purple-light);min-width:36px;font-size:14px">${sz.label}</span>
+          <div style="display:flex;align-items:center;gap:0;flex:1;justify-content:flex-end">
+            <button class="btn" data-action="sz-minus" data-sz="${sz.label}"
+              style="width:36px;min-height:36px;padding:0;font-size:18px;border-radius:8px 0 0 8px;border-right:none">−</button>
+            <span style="min-width:40px;text-align:center;font-size:16px;font-weight:600;color:var(--text);background:var(--surface2);border-top:0.5px solid var(--border);border-bottom:0.5px solid var(--border);padding:6px 4px">${sz.qty || 0}</span>
+            <button class="btn" data-action="sz-plus" data-sz="${sz.label}"
+              style="width:36px;min-height:36px;padding:0;font-size:18px;border-radius:0 8px 8px 0;border-left:none">+</button>
+          </div>
+          <button class="btn d" data-action="sz-remove" data-sz="${sz.label}" style="padding:4px 8px;min-height:36px">✕</button>
+        </div>`).join('')}
+      </div>` : ''}
+
+      <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+        <input class="inp" type="text" id="custom-size-inp" placeholder="Свой размер (42, One Size...)"
+          style="font-size:13px;padding:8px 10px;min-height:40px;flex:1">
+        <button class="btn" data-action="add-custom-size" style="padding:8px 14px;min-height:40px;font-size:13px;flex-shrink:0">+ Добавить</button>
+      </div>
+
+      <div style="font-size:13px;color:var(--text4);margin-top:10px;padding:8px 12px;background:var(--surface2);border-radius:8px">
+        Итого: <b style="color:var(--purple-light);font-size:15px">${pF.qty || 0} шт.</b>
+      </div>
     </div>
     ` : `
     <div class="fr2">
@@ -773,16 +798,45 @@ function renderBatchList() {
           const t = calcP(p);
           const stMap = { pending: 'pending', transit: 'transit', warehouse: 'warehouse' };
           const stLbl = { pending: 'Ожидание', transit: 'В пути', warehouse: 'На складе' };
-          return `<div class="bi">
-            <div style="flex:1;min-width:0">
-              <div class="bi-name">${p.name}</div>
-              <div class="bi-sub">${p.qty} шт. · ¥${p.priceCny}/ед. · <span class="acc">${fmt(t.totalRub)} ₽</span></div>
-              <span class="badge ${stMap[p.status] || 'warehouse'}" style="margin-top:5px;display:inline-block">${stLbl[p.status] || p.status}</span>
+          const isEditing = editingItemId === p.id;
+          return `<div class="bi" style="flex-direction:column;gap:0">
+            <div style="display:flex;align-items:flex-start;gap:10px;width:100%">
+              <div style="flex:1;min-width:0">
+                <div class="bi-name">${p.name}</div>
+                <div class="bi-sub">${p.qty} шт. · ¥${p.priceCny}/ед. · <span class="acc">${fmt(t.totalRub)} ₽</span></div>
+                <span class="badge ${stMap[p.status] || 'warehouse'}" style="margin-top:5px;display:inline-block">${stLbl[p.status] || p.status}</span>
+                ${p.sizes && p.sizes.length ? `<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px">${p.sizes.map(sz=>`<span style="font-size:11px;background:var(--surface2);color:var(--purple-light);border-radius:5px;padding:2px 7px">${sz.label}×${sz.qty}</span>`).join('')}</div>` : ''}
+              </div>
+              <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;flex-shrink:0">
+                ${p.status === 'pending' ? `
+                  <button class="btn g" data-action="receive-item" data-id="${p.id}" style="font-size:12px;padding:5px 10px;min-height:32px">На склад</button>
+                ` : p.status === 'warehouse' ? `
+                  <button class="btn" data-action="return-to-pending" data-id="${p.id}" style="font-size:12px;padding:5px 10px;min-height:32px;color:var(--purple-light);border-color:#3a1a5a">В ожидание</button>
+                ` : ''}
+                <button class="btn" data-action="edit-item" data-id="${p.id}" style="font-size:12px;padding:5px 10px;min-height:32px;color:var(--amber)">✏ Изменить</button>
+                <button class="btn d" data-action="del-item" data-id="${p.id}" style="min-height:32px">✕</button>
+              </div>
             </div>
-            <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex-shrink:0">
-              ${p.status === 'pending' ? `<button class="btn g" data-action="receive-item" data-id="${p.id}" style="font-size:12px;padding:6px 10px;min-height:34px">На склад</button>` : ''}
-              <button class="btn d" data-action="del-item" data-id="${p.id}">✕</button>
-            </div>
+            ${isEditing ? `
+            <div style="margin-top:10px;padding:12px;background:var(--surface2);border-radius:9px;border:0.5px solid var(--accent)">
+              <div style="font-size:11px;color:var(--purple-light);margin-bottom:8px;font-weight:600">РЕДАКТИРОВАНИЕ</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+                <div class="fg"><label>Название</label>
+                  <input class="inp" type="text" id="ei-name" value="${p.name}" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
+                <div class="fg"><label>Кол-во</label>
+                  <input class="inp" type="text" inputmode="numeric" id="ei-qty" value="${p.qty}" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+                <div class="fg"><label>Цена (¥/ед.)</label>
+                  <input class="inp" type="text" inputmode="decimal" id="ei-price" value="${p.priceCny}" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
+                <div class="fg"><label>Заметки</label>
+                  <input class="inp" type="text" id="ei-notes" value="${p.notes||''}" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="btn p" data-action="save-edit" data-id="${p.id}" style="flex:1;min-height:40px;font-size:13px">Сохранить</button>
+                <button class="btn" data-action="cancel-edit" style="min-height:40px;padding:0 14px;font-size:13px">Отмена</button>
+              </div>
+            </div>` : ''}
           </div>`;
         }).join('')}
       </div>` : ''}
@@ -1226,9 +1280,22 @@ function renderAnalytics() {
   <!-- Profit / Revenue by product -->
   ${aState.mode === 'profit' || aState.mode === 'revenue' ? `
   <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">
-      <div class="card-title" style="margin-bottom:0">${aState.mode==='profit'?'Прибыль':'Выручка'} — ${periodLabel()}</div>
-      <div style="font-size:12px;color:var(--text4)">${filteredSales.length} продаж</div>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="card-title" style="margin-bottom:2px">${aState.mode==='profit'?'Прибыль':'Выручка'} — ${periodLabel()}</div>
+        <div style="font-size:12px;color:var(--text4)">${filteredSales.length} продаж</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:11px;color:var(--text4);margin-bottom:2px">${aState.mode==='profit'?'Общая прибыль':'Общая выручка'}</div>
+        <div style="font-size:20px;font-weight:600" class="${
+          aState.mode==='profit'
+            ? (perProd.reduce((a,p)=>a+p.profit,0)>=0?'pp':'np')
+            : 'acc'
+        }">${aState.mode==='profit'
+          ? ((perProd.reduce((a,p)=>a+p.profit,0)>=0?'+':'')+fmt(perProd.reduce((a,p)=>a+p.profit,0))+' ₽')
+          : (fmt(perProd.reduce((a,p)=>a+p.revenue,0))+' ₽')
+        }</div>
+      </div>
     </div>
     ${!perProd.filter(p=>p.soldQty>0).length ? '<div class="empty">Нет продаж за период</div>' :
     perProd.filter(p=>p.soldQty>0).map(p => {
@@ -1537,6 +1604,35 @@ function initClickHandler() {
       addItem(btn.dataset.status);
     } else if (action === 'receive-item') {
       receiveItem(id);
+    } else if (action === 'return-to-pending') {
+      const p = S.purchases.find(p => p.id === id);
+      if (p) { p.status = 'pending'; saveState(); toast('Возвращено в ожидание'); render(); }
+    } else if (action === 'edit-item') {
+      editingItemId = (editingItemId === id) ? null : id;
+      render();
+    } else if (action === 'cancel-edit') {
+      editingItemId = null;
+      render();
+    } else if (action === 'save-edit') {
+      const p = S.purchases.find(p => p.id === id);
+      if (p) {
+        const nameEl = document.getElementById('ei-name');
+        const qtyEl  = document.getElementById('ei-qty');
+        const priceEl= document.getElementById('ei-price');
+        const notesEl= document.getElementById('ei-notes');
+        if (nameEl)  p.name     = nameEl.value.trim() || p.name;
+        if (qtyEl)   p.qty      = parseInt(qtyEl.value) || p.qty;
+        if (priceEl) p.priceCny = parseFloat(priceEl.value.replace(',','.')) || p.priceCny;
+        if (notesEl) p.notes    = notesEl.value;
+        // Recalc cost
+        const t = calcP(p);
+        p.totalRub = t.totalRub;
+        p.perUnit  = t.perUnit;
+        editingItemId = null;
+        saveState();
+        toast('Товар обновлён');
+        render();
+      }
     } else if (action === 'toggle-sizes') {
       syncPurchaseForm();
       pF.useSizes = !pF.useSizes;
@@ -1551,7 +1647,54 @@ function initClickHandler() {
       syncPurchaseForm();
       const idx = parseInt(btn.dataset.idx);
       pF.sizes.splice(idx, 1);
-      if (!pF.sizes.length) pF.sizes = [{ label: '', qty: '' }];
+      if (!pF.sizes.length) pF.sizes = [];
+      render();
+    } else if (action === 'tap-size') {
+      syncPurchaseForm();
+      const sz = btn.dataset.sz;
+      if (!pF.sizes) pF.sizes = [];
+      const ex = pF.sizes.find(s => s.label === sz);
+      if (ex) {
+        // Already added — just bump +1
+        ex.qty = (parseInt(ex.qty) || 0) + 1;
+      } else {
+        pF.sizes.push({ label: sz, qty: 1 });
+      }
+      if (pF.useSizes) pF.qty = pF.sizes.reduce((a,s) => a + (parseInt(s.qty)||0), 0);
+      render();
+    } else if (action === 'sz-plus') {
+      syncPurchaseForm();
+      const sz = btn.dataset.sz;
+      const ex = pF.sizes ? pF.sizes.find(s => s.label === sz) : null;
+      if (ex) { ex.qty = (parseInt(ex.qty) || 0) + 1; }
+      if (pF.useSizes) pF.qty = pF.sizes.reduce((a,s) => a + (parseInt(s.qty)||0), 0);
+      render();
+    } else if (action === 'sz-minus') {
+      syncPurchaseForm();
+      const sz = btn.dataset.sz;
+      const ex = pF.sizes ? pF.sizes.find(s => s.label === sz) : null;
+      if (ex) {
+        ex.qty = Math.max(0, (parseInt(ex.qty) || 0) - 1);
+        if (ex.qty === 0) pF.sizes = pF.sizes.filter(s => s.label !== sz);
+      }
+      if (pF.useSizes) pF.qty = pF.sizes.reduce((a,s) => a + (parseInt(s.qty)||0), 0);
+      render();
+    } else if (action === 'sz-remove') {
+      syncPurchaseForm();
+      const sz = btn.dataset.sz;
+      pF.sizes = pF.sizes ? pF.sizes.filter(s => s.label !== sz) : [];
+      if (pF.useSizes) pF.qty = pF.sizes.reduce((a,s) => a + (parseInt(s.qty)||0), 0);
+      render();
+    } else if (action === 'add-custom-size') {
+      syncPurchaseForm();
+      const inp = document.getElementById('custom-size-inp');
+      const label = inp ? inp.value.trim() : '';
+      if (!label) { toast('Введите название размера'); return; }
+      if (!pF.sizes) pF.sizes = [];
+      const ex = pF.sizes.find(s => s.label === label);
+      if (ex) { ex.qty = (parseInt(ex.qty)||0) + 1; }
+      else pF.sizes.push({ label, qty: 1 });
+      if (pF.useSizes) pF.qty = pF.sizes.reduce((a,s) => a + (parseInt(s.qty)||0), 0);
       render();
     } else if (action === 'receive-batch') {
       receiveBatch(id);
@@ -1606,16 +1749,7 @@ function syncPurchaseForm() {
   });
   const bs = document.getElementById('pf-batch');
   if (bs) pF.batchId = bs.value ? parseInt(bs.value) : null;
-  // Sync size rows from DOM
-  if (pF.useSizes && pF.sizes) {
-    pF.sizes.forEach((sz, i) => {
-      const row = document.getElementById('szrow-' + i);
-      if (!row) return;
-      const inputs = row.querySelectorAll('input');
-      if (inputs[0]) sz.label = inputs[0].value;
-      if (inputs[1]) sz.qty = inputs[1].value;
-    });
-  }
+  // Sizes are managed via state directly (tap buttons), no DOM sync needed
 }
 
 function updatePurchaseCalc() {
