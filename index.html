@@ -347,8 +347,8 @@ let curTab = 'dashboard';
 let charts = {};
 
 // Forms (persistent across re-renders)
-let pF = { name:'', qty:'', priceCny:'', deliveryCny:'', deliveryRub:'', extras:'', customRate:'', notes:'', batchId: null, batchName:'' };
-let sF = { name:'', qty:'', price:'', commission:'' };
+let pF = { name:'', qty:'', priceCny:'', deliveryCny:'', deliveryRub:'', extras:'', customRate:'', notes:'', batchId: null, batchName:'', useSizes: false, sizes: [] };
+let sF = { name:'', qty:'', price:'', commission:'', size:'' };
 
 // ─── Firebase ────────────────────────────────────────────────────────────────
 const FB_CONFIG = {
@@ -472,12 +472,33 @@ function calcForm(f) {
 function getInventory() {
   const inv = {};
   S.purchases.filter(p => p.status === 'warehouse').forEach(p => {
-    if (!inv[p.name]) inv[p.name] = { name: p.name, qty: 0, totalCost: 0 };
+    if (!inv[p.name]) inv[p.name] = { name: p.name, qty: 0, totalCost: 0, sizes: {} };
     inv[p.name].qty += p.qty;
     inv[p.name].totalCost += calcP(p).totalRub;
+    // track sizes
+    if (p.sizes && p.sizes.length) {
+      p.sizes.forEach(sz => {
+        if (!inv[p.name].sizes[sz.label]) inv[p.name].sizes[sz.label] = 0;
+        inv[p.name].sizes[sz.label] += sz.qty;
+      });
+    }
   });
-  S.sales.forEach(s => { if (inv[s.name]) inv[s.name].qty -= s.qty; });
+  S.sales.forEach(s => {
+    if (!inv[s.name]) return;
+    inv[s.name].qty -= s.qty;
+    if (s.size && inv[s.name].sizes[s.size] !== undefined) {
+      inv[s.name].sizes[s.size] = Math.max(0, inv[s.name].sizes[s.size] - s.qty);
+    }
+  });
   return inv;
+}
+
+// Get available sizes for a product (qty > 0)
+function getAvailableSizes(productName) {
+  const inv = getInventory();
+  if (!inv[productName]) return [];
+  const sizes = inv[productName].sizes;
+  return Object.entries(sizes).filter(([,q]) => q > 0).map(([label, qty]) => ({ label, qty }));
 }
 function getProductNames() {
   return [...new Set(S.purchases.filter(p => p.status === 'warehouse').map(p => p.name))];
@@ -611,8 +632,13 @@ function renderDashboard() {
 
 // ─── Purchase ─────────────────────────────────────────────────────────────────
 function renderPurchase() {
-  const t = calcForm(pF);
   const batches = S.batches || [];
+  // Calc qty from sizes if useSizes
+  if (pF.useSizes && pF.sizes && pF.sizes.length) {
+    pF.qty = pF.sizes.reduce((a, s) => a + (parseInt(s.qty) || 0), 0);
+  }
+  const t = calcForm(pF);
+  const sizeRows = (pF.sizes && pF.sizes.length) ? pF.sizes : [{ label: '', qty: '' }];
 
   return `
   <div class="card">
@@ -621,12 +647,50 @@ function renderPurchase() {
       <label>Название товара</label>
       <input class="inp" type="text" placeholder="Джинсы, кроссовки Nike..." id="pf-name" value="${pF.name}">
     </div>
+
+    <!-- Toggle sizes -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:10px 12px;background:var(--surface2);border-radius:9px;border:0.5px solid var(--border)">
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:600;color:var(--text2)">Разбивка по размерам</div>
+        <div style="font-size:11px;color:var(--text4);margin-top:2px">XS, S, M, L, XL — или любые другие варианты</div>
+      </div>
+      <button class="btn${pF.useSizes ? ' p' : ''}" data-action="toggle-sizes" style="font-size:12px;padding:6px 14px;min-height:34px">
+        ${pF.useSizes ? 'Включено ✓' : 'Включить'}
+      </button>
+    </div>
+
+    ${pF.useSizes ? `
+    <!-- Sizes table -->
+    <div style="margin-bottom:10px">
+      <div style="font-size:11px;color:var(--text4);margin-bottom:6px">Размеры и количество</div>
+      <div id="sizes-rows">
+        ${sizeRows.map((sz, i) => `
+        <div style="display:grid;grid-template-columns:1fr 80px 36px;gap:6px;margin-bottom:6px" id="szrow-${i}">
+          <input class="inp" type="text" placeholder="XS, S, M, L, XL, 42..." value="${sz.label}"
+            style="font-size:13px;padding:8px 10px;min-height:40px"
+            onblur="pF.sizes[${i}]=pF.sizes[${i}]||{};pF.sizes[${i}].label=this.value">
+          <input class="inp" type="text" inputmode="numeric" placeholder="кол." value="${sz.qty}"
+            style="font-size:13px;padding:8px 10px;min-height:40px;text-align:center"
+            oninput="pF.sizes[${i}]=pF.sizes[${i}]||{};pF.sizes[${i}].qty=this.value;updatePurchaseCalc()">
+          <button class="btn d" style="min-height:40px;padding:0 10px;font-size:16px" data-action="del-size" data-idx="${i}">×</button>
+        </div>`).join('')}
+      </div>
+      <button class="btn" data-action="add-size" style="font-size:12px;padding:6px 14px;min-height:36px;width:100%;margin-top:2px">+ Добавить размер</button>
+      <div style="font-size:12px;color:var(--text4);margin-top:8px">Итого: <b style="color:var(--purple-light)">${pF.qty || 0} шт.</b></div>
+    </div>
+    ` : `
     <div class="fr2">
       <div class="fg"><label>Количество</label>
         <input class="inp" type="text" inputmode="numeric" placeholder="1" id="pf-qty" value="${pF.qty}"></div>
       <div class="fg"><label>Цена за ед. (¥)</label>
         <input class="inp" type="text" inputmode="decimal" placeholder="0" id="pf-price" value="${pF.priceCny}"></div>
-    </div>
+    </div>`}
+
+    ${pF.useSizes ? `
+    <div class="fg" style="margin-bottom:10px">
+      <label>Цена за ед. (¥)</label>
+      <input class="inp" type="text" inputmode="decimal" placeholder="0" id="pf-price" value="${pF.priceCny}">
+    </div>` : ''}
     <div class="fr3">
       <div class="fg"><label>Свой курс ¥</label>
         <input class="inp" type="text" inputmode="decimal" placeholder="${S.rate}" id="pf-rate" value="${pF.customRate}"></div>
@@ -734,25 +798,50 @@ function renderWarehouse() {
   return `
   <div class="card">
     <div class="card-title">На складе</div>
-    ${!Object.keys(inv).length ? '<div class="empty">Нет товаров на складе</div>' : `
-    <div class="tw"><table>
-      <thead><tr><th>Товар</th><th>Остаток</th><th>Продано</th><th>Себест./шт.</th><th>Вложено</th></tr></thead>
-      <tbody>${Object.values(inv).map(item => {
-        const sold = S.sales.filter(s => s.name === item.name).reduce((a, s) => a + s.qty, 0);
-        const lots = S.purchases.filter(p => p.name === item.name && p.status === 'warehouse');
-        const tq = lots.reduce((a, p) => a + p.qty, 0);
-        const tc = lots.reduce((a, p) => a + calcP(p).totalRub, 0);
-        const pu = tq > 0 ? tc / tq : 0;
-        const rem = Math.max(0, item.qty);
-        return `<tr>
-          <td class="bold">${item.name}</td>
-          <td>${rem}</td>
-          <td>${sold}</td>
-          <td class="acc">${fmt(pu)} ₽</td>
-          <td class="acc">${fmt(tc)} ₽</td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table></div>`}
+    ${!Object.keys(inv).length ? '<div class="empty">Нет товаров на складе</div>' :
+    Object.values(inv).map(item => {
+      const sold = S.sales.filter(s => s.name === item.name).reduce((a, s) => a + s.qty, 0);
+      const lots = S.purchases.filter(p => p.name === item.name && p.status === 'warehouse');
+      const tq = lots.reduce((a,p) => a+p.qty, 0);
+      const tc = lots.reduce((a,p) => a+calcP(p).totalRub, 0);
+      const pu = tq > 0 ? tc/tq : 0;
+      const rem = Math.max(0, item.qty);
+      const hasSizes = Object.keys(item.sizes || {}).length > 0;
+      const isOpen = openBatches['wh-' + item.name];
+
+      return `<div style="border-bottom:0.5px solid var(--border2);padding:10px 0">
+        <div style="display:flex;align-items:center;gap:10px;cursor:${hasSizes?'pointer':'default'}"
+          ${hasSizes ? `onclick="openBatches['wh-${item.name}']=!openBatches['wh-${item.name}'];render()"` : ''}>
+          ${hasSizes ? `<span style="color:var(--text4);font-size:11px;transition:transform 0.15s;display:inline-block;transform:${isOpen?'rotate(90deg)':'none'}">▶</span>` : '<span style="width:15px"></span>'}
+          <div style="flex:1">
+            <span style="font-weight:600;color:var(--text2)">${item.name}</span>
+            ${hasSizes ? `<span class="badge warehouse" style="margin-left:8px;font-size:10px">${Object.keys(item.sizes).length} разм.</span>` : ''}
+          </div>
+          <span style="font-size:13px;color:var(--text4)">Остаток: <b style="color:var(--text2)">${rem} шт.</b></span>
+          <span style="font-size:13px;color:var(--text4);margin-left:10px">Себест.: <b class="acc">${fmt(pu)} ₽</b></span>
+        </div>
+        ${hasSizes && isOpen ? `
+        <div style="margin-top:8px;margin-left:25px">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr>
+              <th style="text-align:left;padding:5px 8px;font-size:10px;color:var(--text4);border-bottom:0.5px solid var(--border2)">Размер</th>
+              <th style="text-align:center;padding:5px 8px;font-size:10px;color:var(--text4);border-bottom:0.5px solid var(--border2)">На складе</th>
+              <th style="text-align:center;padding:5px 8px;font-size:10px;color:var(--text4);border-bottom:0.5px solid var(--border2)">Продано</th>
+            </tr></thead>
+            <tbody>
+              ${Object.entries(item.sizes).map(([label, qty]) => {
+                const soldSz = S.sales.filter(s => s.name === item.name && s.size === label).reduce((a,s) => a+s.qty, 0);
+                return `<tr>
+                  <td style="padding:6px 8px;font-weight:600;color:var(--text2)">${label}</td>
+                  <td style="padding:6px 8px;text-align:center;color:${qty>0?'var(--green)':'var(--text5)'}">${qty}</td>
+                  <td style="padding:6px 8px;text-align:center;color:var(--text4)">${soldSz}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>` : ''}
+      </div>`;
+    }).join('')}
   </div>
 
   ${pending.length > 0 ? `
@@ -840,6 +929,22 @@ function renderSales() {
         placeholder="Начни вводить название..." value="${sF.name}"
         autocomplete="off">
     </div>
+    ${(() => {
+      const sizes = getAvailableSizes(sF.name);
+      if (!sizes.length) return '';
+      return `<div class="fg" style="margin-bottom:10px">
+        <label>Размер <span style="color:var(--text4);font-size:10px">— выбери или впиши</span></label>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+          ${sizes.map(sz => `<button class="btn${sF.size===sz.label?' p':''}" data-action="pick-size" data-size="${sz.label}"
+            style="font-size:13px;padding:7px 14px;min-height:38px">
+            ${sz.label} <span style="font-size:11px;opacity:0.7">(${sz.qty})</span>
+          </button>`).join('')}
+          <button class="btn${!sizes.find(s=>s.label===sF.size)&&sF.size?' p':''}" data-action="pick-size" data-size=""
+            style="font-size:12px;padding:7px 12px;min-height:38px;color:var(--text4)">Без размера</button>
+        </div>
+        ${sF.size ? `<div style="font-size:12px;color:var(--text4)">Выбран: <b style="color:var(--purple-light)">${sF.size}</b> · Остаток: <b style="color:var(--green)">${sizes.find(s=>s.label===sF.size)?.qty||0} шт.</b></div>` : ''}
+      </div>`;
+    })()}
     <div class="fr2">
       <div class="fg"><label>Количество</label>
         <input class="inp" type="text" inputmode="numeric" placeholder="1" id="sf-qty" value="${sF.qty}"></div>
@@ -872,7 +977,7 @@ function renderSales() {
         const margin = rev > 0 ? (prof / rev * 100).toFixed(1) : 0;
         return `<tr>
           <td style="color:var(--text4);font-size:12px">${new Date(s.date).toLocaleDateString('ru-RU')}</td>
-          <td class="bold">${s.name}</td>
+          <td class="bold">${s.name}${s.size ? `<span class="badge warehouse" style="margin-left:6px;font-size:10px;padding:1px 7px">${s.size}</span>` : ''}</td>
           <td>${s.qty}</td>
           <td class="acc">${fmt(rev)} ₽</td>
           <td style="color:var(--text4)">${fmt(comm)} ₽</td>
@@ -1432,6 +1537,22 @@ function initClickHandler() {
       addItem(btn.dataset.status);
     } else if (action === 'receive-item') {
       receiveItem(id);
+    } else if (action === 'toggle-sizes') {
+      syncPurchaseForm();
+      pF.useSizes = !pF.useSizes;
+      if (pF.useSizes && (!pF.sizes || !pF.sizes.length)) pF.sizes = [{ label: '', qty: '' }];
+      render();
+    } else if (action === 'add-size') {
+      syncPurchaseForm();
+      if (!pF.sizes) pF.sizes = [];
+      pF.sizes.push({ label: '', qty: '' });
+      render();
+    } else if (action === 'del-size') {
+      syncPurchaseForm();
+      const idx = parseInt(btn.dataset.idx);
+      pF.sizes.splice(idx, 1);
+      if (!pF.sizes.length) pF.sizes = [{ label: '', qty: '' }];
+      render();
     } else if (action === 'receive-batch') {
       receiveBatch(id);
     } else if (action === 'del-item') {
@@ -1466,6 +1587,9 @@ function initClickHandler() {
       if (f) aState.dateFrom = f.value;
       if (t) aState.dateTo = t.value;
       render();
+    } else if (action === 'pick-size') {
+      sF.size = btn.dataset.size;
+      render();
     }
   });
 }
@@ -1482,6 +1606,16 @@ function syncPurchaseForm() {
   });
   const bs = document.getElementById('pf-batch');
   if (bs) pF.batchId = bs.value ? parseInt(bs.value) : null;
+  // Sync size rows from DOM
+  if (pF.useSizes && pF.sizes) {
+    pF.sizes.forEach((sz, i) => {
+      const row = document.getElementById('szrow-' + i);
+      if (!row) return;
+      const inputs = row.querySelectorAll('input');
+      if (inputs[0]) sz.label = inputs[0].value;
+      if (inputs[1]) sz.qty = inputs[1].value;
+    });
+  }
 }
 
 function updatePurchaseCalc() {
@@ -1516,16 +1650,22 @@ function addItem(status) {
     openBatches[batchId] = true;
   }
   const t = calcForm(pF);
+  // Clean up sizes — remove empty rows
+  const cleanSizes = (pF.useSizes && pF.sizes)
+    ? pF.sizes.filter(s => s.label && parseInt(s.qty) > 0).map(s => ({ label: s.label.trim(), qty: parseInt(s.qty) }))
+    : [];
   S.purchases.push({
-    id: S.nextId++, name: pF.name.trim(), qty, priceCny,
+    id: S.nextId++, name: pF.name.trim(), qty,
+    priceCny,
     customRate: nv(pF.customRate) || 0,
     deliveryCny: nv(pF.deliveryCny) || 0,
     deliveryRub: nv(pF.deliveryRub) || 0,
     extras: nv(pF.extras) || 0,
     notes: pF.notes, batchId, status, date: Date.now(),
-    totalRub: t.totalRub, perUnit: t.perUnit
+    totalRub: t.totalRub, perUnit: t.perUnit,
+    sizes: cleanSizes
   });
-  pF = { name: '', qty: '', priceCny: '', deliveryCny: '', deliveryRub: '', extras: '', customRate: '', notes: '', batchId, batchName: pF.batchName };
+  pF = { name: '', qty: '', priceCny: '', deliveryCny: '', deliveryRub: '', extras: '', customRate: '', notes: '', batchId, batchName: pF.batchName, useSizes: pF.useSizes, sizes: pF.useSizes ? [{ label:'', qty:'' }] : [] };
   saveState();
   toast(status === 'pending' ? 'Добавлено в ожидание' : 'Добавлено на склад');
   render();
@@ -1545,7 +1685,6 @@ function receiveBatch(batchId) {
 }
 
 function addSale() {
-  // Sync from DOM in case user hasn't blurred
   const nameEl = document.getElementById('sf-name');
   if (nameEl) sF.name = nameEl.value.trim();
   if (!sF.name) { toast('Укажите название товара'); return; }
@@ -1554,9 +1693,17 @@ function addSale() {
   const commission = nv(sF.commission);
   if (!price || price <= 0) { toast('Укажите цену продажи'); return; }
   const inv = getInventory();
-  if (!inv[sF.name] || inv[sF.name].qty < qty) { toast('Недостаточно товара на складе'); return; }
-  S.sales.push({ id: S.nextId++, name: sF.name, qty, price, commission, date: Date.now() });
-  sF = { name: sF.name, qty: '', price: '', commission: sF.commission };
+  if (!inv[sF.name]) { toast('Товара нет на складе'); return; }
+  // Check size stock
+  const availSizes = getAvailableSizes(sF.name);
+  if (availSizes.length > 0 && sF.size) {
+    const szStock = availSizes.find(s => s.label === sF.size);
+    if (!szStock || szStock.qty < qty) { toast(`Размер ${sF.size}: недостаточно на складе`); return; }
+  } else if (inv[sF.name].qty < qty) {
+    toast('Недостаточно товара на складе'); return;
+  }
+  S.sales.push({ id: S.nextId++, name: sF.name, qty, price, commission, size: sF.size || '', date: Date.now() });
+  sF = { name: sF.name, qty: '', price: '', commission: sF.commission, size: sF.size };
   saveState();
   toast('Продажа записана');
   render();
