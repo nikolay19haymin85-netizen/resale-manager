@@ -349,7 +349,7 @@ let curTab = 'dashboard';
 let charts = {};
 
 // Forms (persistent across re-renders)
-let pF = { name:'', qty:'', priceCny:'', deliveryCny:'', deliveryRub:'', extras:'', customRate:'', notes:'', batchId: null, batchName:'', useSizes: false, sizes: [], delivMode: 'total', extrasMode: 'total' }; // delivMode: 'total' = одна доставка на всю партию, 'per_item' = доставка за каждую штуку
+let pF = { name:'', qty:'', priceCny:'', deliveryRub:'', extras:'', customRate:'', notes:'', batchId: null, batchName:'', useSizes: false, sizes: [], delivMode: 'total', extrasMode: 'total', weightKg:'', weightRateRub:'500', weightMode:'total' }; // delivMode: 'total' = одна доставка на всю партию, 'per_item' = доставка за каждую штуку
 let sF = { name:'', qty:'', price:'', commission:'', size:'' };
 
 // ─── Firebase ────────────────────────────────────────────────────────────────
@@ -469,12 +469,16 @@ function calcForm(f) {
   const priceCny = nv(f.priceCny);
   const baseCny = priceCny * qty;
   const baseRub = baseCny * rate;
-  const delivPerEntry = nv(f.deliveryCny) ? (nv(f.deliveryCny) * rate) : nv(f.deliveryRub);
+  const delivPerEntry = nv(f.deliveryRub);
   const delivRub = (f.delivMode === 'per_item') ? delivPerEntry * qty : delivPerEntry;
   const extrasEntry = nv(f.extras);
   const extras = (f.extrasMode === 'per_item') ? extrasEntry * qty : extrasEntry;
-  const totalRub = baseRub + delivRub + extras;
-  return { rate, qty, priceCny, baseCny, baseRub, delivRub, extras, extrasEntry, totalRub, perUnit: qty > 0 ? totalRub / qty : 0 };
+  const weightKg = nv(f.weightKg);
+  const weightRate = nv(f.weightRateRub) || 500;
+  const weightCostEntry = weightKg * weightRate;
+  const weightCost = (f.weightMode === 'per_item') ? weightCostEntry * qty : weightCostEntry;
+  const totalRub = baseRub + delivRub + extras + weightCost;
+  return { rate, qty, priceCny, baseCny, baseRub, delivRub, extras, extrasEntry, weightCost, weightKg, totalRub, perUnit: qty > 0 ? totalRub / qty : 0 };
 }
 function getInventory() {
   const inv = {};
@@ -638,6 +642,74 @@ function renderDashboard() {
 }
 
 // ─── Purchase ─────────────────────────────────────────────────────────────────
+function buildToggleRow({label, id, val, mode, action, qty, icon}) {
+  const entry = nv(val);
+  const isPerItem = mode === 'per_item';
+  const total = isPerItem ? entry * qty : entry;
+  return `<div style="margin-bottom:10px">
+    <div class="fg" style="margin-bottom:0">
+      <label>${label}</label>
+      <input class="inp" type="text" inputmode="decimal" placeholder="0" id="${id}" value="${val}"
+        style="border-bottom-left-radius:${entry>0?'0':'8px'};border-bottom-right-radius:${entry>0?'0':'8px'}">
+    </div>
+    ${entry > 0 ? `
+    <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--surface2);border-radius:0 0 9px 9px;border:0.5px solid var(--border);border-top:none">
+      <div style="flex:1;font-size:13px;color:var(--text2)">
+        ${isPerItem
+          ? `<b style="color:var(--purple-light)">${fmt(entry)} ₽ × ${qty} шт. = <span style="font-size:15px">${fmt(total)} ₽</span></b>`
+          : `<b style="color:var(--purple-light)">${fmt(entry)} ₽</b> <span style="color:var(--text4)">на всю партию</span> <span style="color:var(--text4);font-size:11px">(~${fmt(qty>1?entry/qty:entry)} ₽/шт.)</span>`
+        }
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+        <span style="font-size:11px;color:var(--text4)">×/шт.</span>
+        <div style="position:relative;width:42px;height:24px;cursor:pointer;touch-action:manipulation" data-action="${action}" data-mode="${isPerItem?'total':'per_item'}">
+          <div style="width:42px;height:24px;border-radius:12px;background:${isPerItem?'#6C63FF':'#2a2d3e'}"></div>
+          <div style="position:absolute;top:3px;left:${isPerItem?'21px':'3px'};width:18px;height:18px;border-radius:50%;background:#fff"></div>
+        </div>
+      </div>
+    </div>` : ''}
+  </div>`;
+}
+
+function buildWeightRow(f) {
+  const qty = nv(f.qty,1)||1;
+  const weightKg = nv(f.weightKg);
+  const weightRate = nv(f.weightRateRub)||500;
+  const isPerItem = f.weightMode === 'per_item';
+  const costEntry = weightKg * weightRate;
+  const totalCost = isPerItem ? costEntry * qty : costEntry;
+  return `<div style="margin-bottom:10px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:0">
+      <div class="fg">
+        <label>Вес (кг)</label>
+        <input class="inp" type="text" inputmode="decimal" placeholder="0" id="pf-weight" value="${f.weightKg}"
+          style="border-bottom-left-radius:${weightKg>0?'0':'8px'};border-bottom-right-radius:${weightKg>0?'0':'0'}">
+      </div>
+      <div class="fg">
+        <label>Ставка (₽/кг)</label>
+        <input class="inp" type="text" inputmode="decimal" placeholder="500" id="pf-wrate" value="${f.weightRateRub}"
+          style="border-bottom-left-radius:0;border-bottom-right-radius:${weightKg>0?'0':'8px'}">
+      </div>
+    </div>
+    ${weightKg > 0 ? `
+    <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--surface2);border-radius:0 0 9px 9px;border:0.5px solid var(--border);border-top:none">
+      <div style="flex:1;font-size:13px;color:var(--text2)">
+        ${isPerItem
+          ? `${fmtf(weightKg)} кг × ${weightRate} ₽ × ${qty} шт. = <b style="color:var(--purple-light);font-size:15px">${fmt(totalCost)} ₽</b>`
+          : `${fmtf(weightKg)} кг × ${weightRate} ₽/кг = <b style="color:var(--purple-light)">${fmt(costEntry)} ₽</b> <span style="color:var(--text4);font-size:11px">на партию (~${fmt(qty>1?costEntry/qty:costEntry)} ₽/шт.)</span>`
+        }
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+        <span style="font-size:11px;color:var(--text4)">×/шт.</span>
+        <div style="position:relative;width:42px;height:24px;cursor:pointer;touch-action:manipulation" data-action="weight-mode" data-mode="${isPerItem?'total':'per_item'}">
+          <div style="width:42px;height:24px;border-radius:12px;background:${isPerItem?'#6C63FF':'#2a2d3e'}"></div>
+          <div style="position:absolute;top:3px;left:${isPerItem?'21px':'3px'};width:18px;height:18px;border-radius:50%;background:#fff"></div>
+        </div>
+      </div>
+    </div>` : ''}
+  </div>`;
+}
+
 function renderPurchase() {
   const batches = S.batches || [];
   // Calc qty from sizes if useSizes
@@ -727,72 +799,19 @@ function renderPurchase() {
       <input class="inp" type="text" inputmode="decimal" placeholder="${S.rate}" id="pf-rate" value="${pF.customRate}">
     </div>
 
-    <!-- Delivery fields with inline toggle -->
-    ${(() => {
-      const qty = nv(pF.qty, 1) || 1;
-      const rate = nv(pF.customRate) || S.rate;
-      const delivEntry = nv(pF.deliveryCny) ? nv(pF.deliveryCny) * rate : nv(pF.deliveryRub);
-      const isPerItem = pF.delivMode === 'per_item';
-      const delivTotal = isPerItem ? delivEntry * qty : delivEntry;
-      return `<div style="margin-bottom:10px">
-        <div style="display:flex;gap:8px;margin-bottom:${delivEntry>0?'8px':'0'}">
-          <div class="fg" style="flex:1">
-            <label>Доставка (¥)</label>
-            <input class="inp" type="text" inputmode="decimal" placeholder="0" id="pf-dcny" value="${pF.deliveryCny}">
-          </div>
-          <div class="fg" style="flex:1">
-            <label>Доставка (₽)</label>
-            <input class="inp" type="text" inputmode="decimal" placeholder="0" id="pf-drub" value="${pF.deliveryRub}">
-          </div>
-        </div>
-        ${delivEntry > 0 ? `
-        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--surface2);border-radius:9px;border:0.5px solid var(--border)">
-          <div style="flex:1;font-size:13px;color:var(--text2)">
-            ${isPerItem
-              ? `<b style="color:var(--purple-light)">${fmt(delivEntry)} ₽ × ${qty} шт. = ${fmt(delivTotal)} ₽</b>`
-              : `<b style="color:var(--purple-light)">${fmt(delivEntry)} ₽</b> на всю партию <span style="color:var(--text4)">(~${fmt(qty>1?delivEntry/qty:delivEntry)} ₽/шт.)</span>`
-            }
-          </div>
-          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-            <span style="font-size:12px;color:var(--text4)">×/шт.</span>
-            <div style="position:relative;width:42px;height:24px;cursor:pointer" data-action="deliv-mode" data-mode="${isPerItem?'total':'per_item'}">
-              <div style="width:42px;height:24px;border-radius:12px;background:${isPerItem?'#6C63FF':'var(--border)'};transition:background 0.2s"></div>
-              <div style="position:absolute;top:3px;left:${isPerItem?'21px':'3px'};width:18px;height:18px;border-radius:50%;background:#fff;transition:left 0.2s"></div>
-            </div>
-          </div>
-        </div>` : ''}
-      </div>`;
-    })()}
-
-    <!-- Extras field with inline toggle -->
-    ${(() => {
-      const qty = nv(pF.qty, 1) || 1;
-      const extrasEntry = nv(pF.extras);
-      const isPerItem = pF.extrasMode === 'per_item';
-      const extrasTotal = isPerItem ? extrasEntry * qty : extrasEntry;
-      return `<div style="margin-bottom:10px">
-        <div class="fg" style="margin-bottom:${extrasEntry>0?'8px':'0'}">
-          <label>Прочие расходы (₽)</label>
-          <input class="inp" type="text" inputmode="decimal" placeholder="0" id="pf-extras" value="${pF.extras}">
-        </div>
-        ${extrasEntry > 0 ? `
-        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--surface2);border-radius:9px;border:0.5px solid var(--border)">
-          <div style="flex:1;font-size:13px;color:var(--text2)">
-            ${isPerItem
-              ? `<b style="color:var(--purple-light)">${fmt(extrasEntry)} ₽ × ${qty} шт. = ${fmt(extrasTotal)} ₽</b>`
-              : `<b style="color:var(--purple-light)">${fmt(extrasEntry)} ₽</b> на всю партию <span style="color:var(--text4)">(~${fmt(qty>1?extrasEntry/qty:extrasEntry)} ₽/шт.)</span>`
-            }
-          </div>
-          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-            <span style="font-size:12px;color:var(--text4)">×/шт.</span>
-            <div style="position:relative;width:42px;height:24px;cursor:pointer" data-action="extras-mode" data-mode="${isPerItem?'total':'per_item'}">
-              <div style="width:42px;height:24px;border-radius:12px;background:${isPerItem?'#6C63FF':'var(--border)'};transition:background 0.2s"></div>
-              <div style="position:absolute;top:3px;left:${isPerItem?'21px':'3px'};width:18px;height:18px;border-radius:50%;background:#fff;transition:left 0.2s"></div>
-            </div>
-          </div>
-        </div>` : ''}
-      </div>`;
-    })()}
+    <!-- Costs section -->
+    ${buildToggleRow({
+      label: 'Доставка (₽)', id: 'pf-drub', val: pF.deliveryRub,
+      mode: pF.delivMode, action: 'deliv-mode',
+      qty: nv(pF.qty,1)||1, icon: '🚚'
+    })}
+    ${buildToggleRow({
+      label: 'Прочие расходы (₽)', id: 'pf-extras', val: pF.extras,
+      mode: pF.extrasMode, action: 'extras-mode',
+      qty: nv(pF.qty,1)||1, icon: '💰'
+    })}
+    <!-- Weight cost section -->
+    ${buildWeightRow(pF)}
 
     <div class="fg" style="margin-bottom:10px">
       <label>Заметки</label>
@@ -814,6 +833,7 @@ function renderPurchase() {
       <div class="crow"><span>Цена без доп. расходов</span><span style="color:var(--text2)">${fmt(t.baseRub)} ₽ · ${fmt(t.qty>0?t.baseRub/t.qty:0)} ₽/шт.</span></div>
       <div class="crow"><span style="color:var(--text4)">+ Доставка</span><span style="color:var(--text4)">${fmt(t.delivRub)} ₽${t.delivRub>0?' · '+fmt(t.delivRub/t.qty)+' ₽/шт.':''}</span></div>
       <div class="crow"><span style="color:var(--text4)">+ Прочее</span><span style="color:var(--text4)">${fmt(t.extras)} ₽${t.extras>0?' · '+fmt(t.extras/t.qty)+' ₽/шт.':''}</span></div>
+      ${t.weightCost > 0 ? `<div class="crow"><span style="color:var(--text4)">+ Вес (${fmtf(t.weightKg)} кг)</span><span style="color:var(--text4)">${fmt(t.weightCost)} ₽ · ${fmt(t.weightCost/t.qty)} ₽/шт.</span></div>` : ''}
       <div style="height:0.5px;background:var(--border2);margin:6px 0"></div>
       <div class="crow tot"><span>Итого партия</span><span class="acc">${fmt(t.totalRub)} ₽</span></div>
       <div class="crow tot" style="margin-top:4px">
@@ -932,6 +952,18 @@ function renderBatchList() {
                   <input class="inp" type="text" inputmode="decimal" id="ei-drub" value="${p.deliveryRub||''}" placeholder="0" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
                 <div class="fg"><label>Прочие расходы (₽)</label>
                   <input class="inp" type="text" inputmode="decimal" id="ei-extras" value="${p.extras||''}" placeholder="0" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+                <div class="fg"><label>Вес (кг)</label>
+                  <input class="inp" type="text" inputmode="decimal" id="ei-weight" value="${p.weightKg||''}" placeholder="0" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
+                <div class="fg"><label>Ставка (₽/кг)</label>
+                  <input class="inp" type="text" inputmode="decimal" id="ei-wrate" value="${p.weightRateRub||500}" placeholder="500" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
+                <div class="fg"><label>Режим веса</label>
+                  <select style="width:100%;padding:8px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text);font-size:13px;min-height:40px;font-family:inherit" id="ei-wmode">
+                    <option value="total" ${(p.weightMode||'total')==='total'?'selected':''}>На партию</option>
+                    <option value="per_item" ${p.weightMode==='per_item'?'selected':''}>За шт.</option>
+                  </select>
+                </div>
               </div>
               <div class="fg" style="margin-bottom:8px"><label>Заметки</label>
                 <input class="inp" type="text" id="ei-notes" value="${p.notes||''}" style="font-size:13px;padding:8px 10px;min-height:40px"></div>
@@ -1752,14 +1784,15 @@ function bindFormFields() {
   // Purchase form
   const pfBinds = [
     ['pf-name', 'name'], ['pf-qty', 'qty'], ['pf-price', 'priceCny'],
-    ['pf-rate', 'customRate'], ['pf-dcny', 'deliveryCny'], ['pf-drub', 'deliveryRub'],
-    ['pf-extras', 'extras'], ['pf-notes', 'notes'], ['pf-bname', 'batchName']
+    ['pf-rate', 'customRate'], ['pf-drub', 'deliveryRub'],
+    ['pf-extras', 'extras'], ['pf-notes', 'notes'], ['pf-bname', 'batchName'],
+    ['pf-weight', 'weightKg'], ['pf-wrate', 'weightRateRub']
   ];
   pfBinds.forEach(([id, key]) => {
     const inp = document.getElementById(id);
     if (!inp) return;
     inp.addEventListener('blur', () => { pF[key] = inp.value; });
-    if (['pf-qty','pf-price','pf-rate','pf-dcny','pf-drub','pf-extras'].includes(id)) {
+    if (['pf-qty','pf-price','pf-rate','pf-drub','pf-extras','pf-weight','pf-wrate'].includes(id)) {
       inp.addEventListener('input', () => {
         pF[key] = inp.value;
         updatePurchaseCalc();
@@ -1767,7 +1800,7 @@ function bindFormFields() {
       // Re-render toggles when leaving field
       inp.addEventListener('blur', () => {
         pF[key] = inp.value;
-        if (['pf-qty','pf-dcny','pf-drub','pf-extras'].includes(id)) {
+        if (['pf-qty','pf-drub','pf-extras','pf-weight','pf-wrate'].includes(id)) {
           syncPurchaseForm(); render();
         }
       });
@@ -1888,7 +1921,13 @@ function initClickHandler() {
         if (dcnyEl)  p.deliveryCny= parseFloat(dcnyEl.value.replace(',','.')) || 0;
         if (drubEl)  p.deliveryRub= parseFloat(drubEl.value.replace(',','.')) || 0;
         if (extEl)   p.extras     = parseFloat(extEl.value.replace(',','.')) || 0;
-        if (notesEl) p.notes      = notesEl.value;
+        const wEl   = document.getElementById('ei-weight');
+        const wrEl  = document.getElementById('ei-wrate');
+        const wmEl  = document.getElementById('ei-wmode');
+        if (wEl)   p.weightKg      = parseFloat(wEl.value.replace(',','.')) || 0;
+        if (wrEl)  p.weightRateRub = parseFloat(wrEl.value.replace(',','.')) || 500;
+        if (wmEl)  p.weightMode    = wmEl.value;
+        if (notesEl) p.notes       = notesEl.value;
         // Recalc cost
         const t = calcP(p);
         p.totalRub = t.totalRub;
@@ -1999,6 +2038,10 @@ function initClickHandler() {
       syncPurchaseForm();
       pF.extrasMode = btn.dataset.mode;
       render();
+    } else if (action === 'weight-mode') {
+      syncPurchaseForm();
+      pF.weightMode = btn.dataset.mode;
+      render();
     } else if (action === 'aapply') {
       const f = document.getElementById('a-from');
       const t = document.getElementById('a-to');
@@ -2015,8 +2058,9 @@ function initClickHandler() {
 function syncPurchaseForm() {
   const fields = [
     ['pf-name', 'name'], ['pf-qty', 'qty'], ['pf-price', 'priceCny'],
-    ['pf-rate', 'customRate'], ['pf-dcny', 'deliveryCny'], ['pf-drub', 'deliveryRub'],
-    ['pf-extras', 'extras'], ['pf-notes', 'notes'], ['pf-bname', 'batchName']
+    ['pf-rate', 'customRate'], ['pf-drub', 'deliveryRub'],
+    ['pf-extras', 'extras'], ['pf-notes', 'notes'], ['pf-bname', 'batchName'],
+    ['pf-weight', 'weightKg'], ['pf-wrate', 'weightRateRub']
   ];
   fields.forEach(([id, key]) => {
     const el = document.getElementById(id);
@@ -2067,16 +2111,18 @@ function addItem(status) {
     id: S.nextId++, name: pF.name.trim(), qty,
     priceCny,
     customRate: nv(pF.customRate) || 0,
-    deliveryCny: nv(pF.deliveryCny) || 0,
     deliveryRub: nv(pF.deliveryRub) || 0,
     extras: nv(pF.extras) || 0,
     delivMode: pF.delivMode || 'total',
     extrasMode: pF.extrasMode || 'total',
+    weightKg: nv(pF.weightKg) || 0,
+    weightRateRub: nv(pF.weightRateRub) || 500,
+    weightMode: pF.weightMode || 'total',
     notes: pF.notes, batchId, status, date: Date.now(),
     totalRub: t.totalRub, perUnit: t.perUnit,
     sizes: cleanSizes
   });
-  pF = { name: '', qty: '', priceCny: '', deliveryCny: '', deliveryRub: '', extras: '', customRate: '', notes: '', batchId, batchName: pF.batchName, useSizes: pF.useSizes, sizes: pF.useSizes ? [{ label:'', qty:'' }] : [], delivMode: pF.delivMode || 'total', extrasMode: pF.extrasMode || 'total' };
+  pF = { name: '', qty: '', priceCny: '', deliveryRub: '', extras: '', customRate: '', notes: '', batchId, batchName: pF.batchName, useSizes: pF.useSizes, sizes: pF.useSizes ? [{ label:'', qty:'' }] : [], delivMode: pF.delivMode||'total', extrasMode: pF.extrasMode||'total', weightKg: pF.weightKg||'', weightRateRub: pF.weightRateRub||'500', weightMode: pF.weightMode||'total' };
   saveState();
   toast(status === 'pending' ? 'Добавлено в ожидание' : 'Добавлено на склад');
   render();
