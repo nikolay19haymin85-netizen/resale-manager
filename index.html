@@ -852,7 +852,15 @@ function renderBatchList() {
   return batches.slice().reverse().map(b => {
     const items = S.purchases.filter(p => p.batchId === b.id);
     const pending = items.filter(p => p.status === 'pending');
-    const total = items.reduce((a, p) => a + calcP(p).totalRub, 0);
+    const totalWithAll = items.reduce((a, p) => a + calcP(p).totalRub, 0);
+    // Цена только товаров без доставки и прочих расходов
+    const totalGoods = items.reduce((a, p) => {
+      const rate = p.customRate || S.rate;
+      return a + (p.priceCny || 0) * (p.qty || 1) * rate;
+    }, 0);
+    const totalDelivery = items.reduce((a, p) => a + calcP(p).delivRub, 0);
+    const totalExtras = items.reduce((a, p) => a + calcP(p).extras, 0);
+    const hasExtra = totalDelivery > 0 || totalExtras > 0;
     const isOpen = openBatches[b.id];
     const date = new Date(b.date).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric' });
 
@@ -862,8 +870,16 @@ function renderBatchList() {
         <div style="flex:1;min-width:0">
           <div style="font-weight:600;font-size:14px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.label}</div>
           <div style="font-size:12px;color:var(--text4);margin-top:2px">
-            ${date} · ${items.length} поз. · <span class="acc">${fmt(total)} ₽</span>
+            ${date} · ${items.length} поз.
             ${pending.length ? ` · <span style="color:var(--purple-light)">${pending.length} ожид.</span>` : ''}
+          </div>
+          <div style="font-size:12px;margin-top:3px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            <span>Товар: <b style="color:var(--text2)">${fmt(totalGoods)} ₽</b></span>
+            ${hasExtra ? `<span style="color:var(--text4)">+</span>
+            ${totalDelivery > 0 ? `<span>Дост.: <b style="color:var(--text4)">${fmt(totalDelivery)} ₽</b></span>` : ''}
+            ${totalExtras > 0 ? `<span>Проч.: <b style="color:var(--text4)">${fmt(totalExtras)} ₽</b></span>` : ''}
+            <span style="color:var(--text4)">=</span>
+            <span class="acc"><b>${fmt(totalWithAll)} ₽</b></span>` : `<span class="acc"><b>${fmt(totalGoods)} ₽</b></span>`}
           </div>
         </div>
         ${pending.length > 0 ? `<button class="btn g" data-action="receive-batch" data-id="${b.id}" style="font-size:12px;padding:6px 10px;min-height:34px;flex-shrink:0">Принять всё</button>` : ''}
