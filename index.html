@@ -349,7 +349,7 @@ let curTab = 'dashboard';
 let charts = {};
 
 // Forms (persistent across re-renders)
-let pF = { name:'', qty:'', priceCny:'', deliveryCny:'', deliveryRub:'', extras:'', customRate:'', notes:'', batchId: null, batchName:'', useSizes: false, sizes: [], delivMode: 'total' }; // delivMode: 'total' = одна доставка на всю партию, 'per_item' = доставка за каждую штуку
+let pF = { name:'', qty:'', priceCny:'', deliveryCny:'', deliveryRub:'', extras:'', customRate:'', notes:'', batchId: null, batchName:'', useSizes: false, sizes: [], delivMode: 'total', extrasMode: 'total' }; // delivMode: 'total' = одна доставка на всю партию, 'per_item' = доставка за каждую штуку
 let sF = { name:'', qty:'', price:'', commission:'', size:'' };
 
 // ─── Firebase ────────────────────────────────────────────────────────────────
@@ -458,9 +458,10 @@ function calcP(p) {
   // delivMode: 'per_item' = доставка умножается на кол-во, 'total' = фиксированная на партию
   const delivPerEntry = p.deliveryCny ? (p.deliveryCny * rate) : (p.deliveryRub || 0);
   const delivRub = (p.delivMode === 'per_item') ? delivPerEntry * qty : delivPerEntry;
-  const extras = p.extras || 0;
+  const extrasEntry = p.extras || 0;
+  const extras = (p.extrasMode === 'per_item') ? extrasEntry * qty : extrasEntry;
   const totalRub = baseRub + delivRub + extras;
-  return { rate, baseCny, baseRub, delivRub, extras, totalRub, perUnit: qty > 0 ? totalRub / qty : 0 };
+  return { rate, baseCny, baseRub, delivRub, extras, extrasEntry, totalRub, perUnit: qty > 0 ? totalRub / qty : 0 };
 }
 function calcForm(f) {
   const rate = nv(f.customRate) || S.rate;
@@ -470,9 +471,10 @@ function calcForm(f) {
   const baseRub = baseCny * rate;
   const delivPerEntry = nv(f.deliveryCny) ? (nv(f.deliveryCny) * rate) : nv(f.deliveryRub);
   const delivRub = (f.delivMode === 'per_item') ? delivPerEntry * qty : delivPerEntry;
-  const extras = nv(f.extras);
+  const extrasEntry = nv(f.extras);
+  const extras = (f.extrasMode === 'per_item') ? extrasEntry * qty : extrasEntry;
   const totalRub = baseRub + delivRub + extras;
-  return { rate, qty, priceCny, baseCny, baseRub, delivRub, extras, totalRub, perUnit: qty > 0 ? totalRub / qty : 0 };
+  return { rate, qty, priceCny, baseCny, baseRub, delivRub, extras, extrasEntry, totalRub, perUnit: qty > 0 ? totalRub / qty : 0 };
 }
 function getInventory() {
   const inv = {};
@@ -720,53 +722,81 @@ function renderPurchase() {
       <label>Цена за ед. (¥)</label>
       <input class="inp" type="text" inputmode="decimal" placeholder="0" id="pf-price" value="${pF.priceCny}">
     </div>` : ''}
-    <div class="fr3">
-      <div class="fg"><label>Свой курс ¥</label>
-        <input class="inp" type="text" inputmode="decimal" placeholder="${S.rate}" id="pf-rate" value="${pF.customRate}"></div>
-      <div class="fg"><label>Доставка (¥)</label>
-        <input class="inp" type="text" inputmode="decimal" placeholder="0" id="pf-dcny" value="${pF.deliveryCny}"></div>
-      <div class="fg"><label>Доставка (₽)</label>
-        <input class="inp" type="text" inputmode="decimal" placeholder="0" id="pf-drub" value="${pF.deliveryRub}"></div>
+    <div class="fg" style="margin-bottom:10px">
+      <label>Свой курс ¥</label>
+      <input class="inp" type="text" inputmode="decimal" placeholder="${S.rate}" id="pf-rate" value="${pF.customRate}">
     </div>
 
-    <!-- Delivery mode selector -->
+    <!-- Delivery fields with inline toggle -->
     ${(() => {
       const qty = nv(pF.qty, 1) || 1;
       const rate = nv(pF.customRate) || S.rate;
       const delivEntry = nv(pF.deliveryCny) ? nv(pF.deliveryCny) * rate : nv(pF.deliveryRub);
-      if (delivEntry <= 0) return '';
       const isPerItem = pF.delivMode === 'per_item';
       const delivTotal = isPerItem ? delivEntry * qty : delivEntry;
-      const delivPerUnit = isPerItem ? delivEntry : delivEntry / qty;
-      const basePerUnit = nv(pF.priceCny) * rate;
       return `<div style="margin-bottom:10px">
-        <div style="font-size:11px;color:var(--text4);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">Режим доставки</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-          <button class="btn${!isPerItem ? ' p' : ''}" data-action="deliv-mode" data-mode="total"
-            style="padding:10px 12px;min-height:auto;display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left">
-            <span style="font-size:13px;font-weight:600">На всю партию</span>
-            <span style="font-size:11px;opacity:0.75">${fmt(delivEntry)} ₽ × 1 = <b>${fmt(delivEntry)} ₽</b></span>
-            <span style="font-size:11px;opacity:0.6">~${fmt(delivEntry/qty)} ₽/шт. в среднем</span>
-          </button>
-          <button class="btn${isPerItem ? ' p' : ''}" data-action="deliv-mode" data-mode="per_item"
-            style="padding:10px 12px;min-height:auto;display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left">
-            <span style="font-size:13px;font-weight:600">За каждую штуку</span>
-            <span style="font-size:11px;opacity:0.75">${fmt(delivEntry)} ₽ × ${qty} = <b>${fmt(delivEntry*qty)} ₽</b></span>
-            <span style="font-size:11px;opacity:0.6">${fmt(delivEntry)} ₽/шт. точно</span>
-          </button>
+        <div style="display:flex;gap:8px;margin-bottom:${delivEntry>0?'8px':'0'}">
+          <div class="fg" style="flex:1">
+            <label>Доставка (¥)</label>
+            <input class="inp" type="text" inputmode="decimal" placeholder="0" id="pf-dcny" value="${pF.deliveryCny}">
+          </div>
+          <div class="fg" style="flex:1">
+            <label>Доставка (₽)</label>
+            <input class="inp" type="text" inputmode="decimal" placeholder="0" id="pf-drub" value="${pF.deliveryRub}">
+          </div>
         </div>
-        <div style="padding:8px 12px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--text4)">
-          Итого доставка: <b style="color:var(--purple-light)">${fmt(delivTotal)} ₽</b>
-          · Себест. с доставкой: <b style="color:var(--purple-light)">${fmt(basePerUnit + delivPerUnit)} ₽/шт.</b>
-        </div>
+        ${delivEntry > 0 ? `
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--surface2);border-radius:9px;border:0.5px solid var(--border)">
+          <div style="flex:1;font-size:13px;color:var(--text2)">
+            ${isPerItem
+              ? `<b style="color:var(--purple-light)">${fmt(delivEntry)} ₽ × ${qty} шт. = ${fmt(delivTotal)} ₽</b>`
+              : `<b style="color:var(--purple-light)">${fmt(delivEntry)} ₽</b> на всю партию <span style="color:var(--text4)">(~${fmt(qty>1?delivEntry/qty:delivEntry)} ₽/шт.)</span>`
+            }
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+            <span style="font-size:12px;color:var(--text4)">×/шт.</span>
+            <div style="position:relative;width:42px;height:24px;cursor:pointer" data-action="deliv-mode" data-mode="${isPerItem?'total':'per_item'}">
+              <div style="width:42px;height:24px;border-radius:12px;background:${isPerItem?'#6C63FF':'var(--border)'};transition:background 0.2s"></div>
+              <div style="position:absolute;top:3px;left:${isPerItem?'21px':'3px'};width:18px;height:18px;border-radius:50%;background:#fff;transition:left 0.2s"></div>
+            </div>
+          </div>
+        </div>` : ''}
       </div>`;
     })()}
 
-    <div class="fr2">
-      <div class="fg"><label>Прочие расходы (₽)</label>
-        <input class="inp" type="text" inputmode="decimal" placeholder="0" id="pf-extras" value="${pF.extras}"></div>
-      <div class="fg"><label>Заметки</label>
-        <input class="inp" type="text" placeholder="Трек, артикул..." id="pf-notes" value="${pF.notes}"></div>
+    <!-- Extras field with inline toggle -->
+    ${(() => {
+      const qty = nv(pF.qty, 1) || 1;
+      const extrasEntry = nv(pF.extras);
+      const isPerItem = pF.extrasMode === 'per_item';
+      const extrasTotal = isPerItem ? extrasEntry * qty : extrasEntry;
+      return `<div style="margin-bottom:10px">
+        <div class="fg" style="margin-bottom:${extrasEntry>0?'8px':'0'}">
+          <label>Прочие расходы (₽)</label>
+          <input class="inp" type="text" inputmode="decimal" placeholder="0" id="pf-extras" value="${pF.extras}">
+        </div>
+        ${extrasEntry > 0 ? `
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--surface2);border-radius:9px;border:0.5px solid var(--border)">
+          <div style="flex:1;font-size:13px;color:var(--text2)">
+            ${isPerItem
+              ? `<b style="color:var(--purple-light)">${fmt(extrasEntry)} ₽ × ${qty} шт. = ${fmt(extrasTotal)} ₽</b>`
+              : `<b style="color:var(--purple-light)">${fmt(extrasEntry)} ₽</b> на всю партию <span style="color:var(--text4)">(~${fmt(qty>1?extrasEntry/qty:extrasEntry)} ₽/шт.)</span>`
+            }
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+            <span style="font-size:12px;color:var(--text4)">×/шт.</span>
+            <div style="position:relative;width:42px;height:24px;cursor:pointer" data-action="extras-mode" data-mode="${isPerItem?'total':'per_item'}">
+              <div style="width:42px;height:24px;border-radius:12px;background:${isPerItem?'#6C63FF':'var(--border)'};transition:background 0.2s"></div>
+              <div style="position:absolute;top:3px;left:${isPerItem?'21px':'3px'};width:18px;height:18px;border-radius:50%;background:#fff;transition:left 0.2s"></div>
+            </div>
+          </div>
+        </div>` : ''}
+      </div>`;
+    })()}
+
+    <div class="fg" style="margin-bottom:10px">
+      <label>Заметки</label>
+      <input class="inp" type="text" placeholder="Трек, артикул..." id="pf-notes" value="${pF.notes}">
     </div>
     <div class="fr2" style="margin-bottom:${pF.batchId ? '0' : '10px'}">
       <div class="fg"><label>Партия</label>
@@ -781,11 +811,20 @@ function renderPurchase() {
 
     <div class="cbox">
       <div class="crow"><span>Сумма ¥</span><span class="acc">¥${fmtf(t.baseCny)}</span></div>
-      <div class="crow"><span>База (×${t.rate})</span><span>${fmt(t.baseRub)} ₽</span></div>
-      <div class="crow"><span>Доставка</span><span>${fmt(t.delivRub)} ₽</span></div>
-      <div class="crow"><span>Прочее</span><span>${fmt(t.extras)} ₽</span></div>
-      <div class="crow tot"><span>Итого</span><span class="acc">${fmt(t.totalRub)} ₽</span></div>
-      <div class="crow tot"><span>Себест./шт.</span><span class="acc">${fmt(t.perUnit)} ₽</span></div>
+      <div class="crow"><span>Цена без доп. расходов</span><span style="color:var(--text2)">${fmt(t.baseRub)} ₽ · ${fmt(t.qty>0?t.baseRub/t.qty:0)} ₽/шт.</span></div>
+      <div class="crow"><span style="color:var(--text4)">+ Доставка</span><span style="color:var(--text4)">${fmt(t.delivRub)} ₽${t.delivRub>0?' · '+fmt(t.delivRub/t.qty)+' ₽/шт.':''}</span></div>
+      <div class="crow"><span style="color:var(--text4)">+ Прочее</span><span style="color:var(--text4)">${fmt(t.extras)} ₽${t.extras>0?' · '+fmt(t.extras/t.qty)+' ₽/шт.':''}</span></div>
+      <div style="height:0.5px;background:var(--border2);margin:6px 0"></div>
+      <div class="crow tot"><span>Итого партия</span><span class="acc">${fmt(t.totalRub)} ₽</span></div>
+      <div class="crow tot" style="margin-top:4px">
+        <span>Себест./шт. с доставкой</span>
+        <span style="color:#5DCAA5;font-size:15px">${fmt(t.perUnit)} ₽</span>
+      </div>
+      ${t.delivRub > 0 || t.extras > 0 ? `
+      <div class="crow" style="margin-top:4px;padding-top:4px;border-top:0.5px dashed var(--border2)">
+        <span style="color:var(--text4)">Только товар (без доставки)</span>
+        <span style="color:var(--text4)">${fmt(t.qty>0?t.baseRub/t.qty:0)} ₽/шт.</span>
+      </div>` : ''}
     </div>
 
     <div class="fr2" style="margin-top:4px">
@@ -993,20 +1032,45 @@ function renderWarehouse() {
     </div>`;
   }).join('')}
 
-  ${pending.length > 0 ? `
-  <div class="card">
-    <div class="card-title" style="color:var(--purple-light)">В ожидании — ${pending.length}</div>
-    ${pending.map(p => {
-      const b = (S.batches||[]).find(b => b.id === p.batchId);
-      return `<div class="pending-row" style="border-color:var(--border2)">
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:600;color:var(--text2)">${p.name}</div>
-          <div style="font-size:12px;color:var(--text4);margin-top:2px">${b?b.label:''} · ${p.qty} шт. · <span class="acc">${fmt(calcP(p).totalRub)} ₽</span></div>
+  ${(() => {
+    if (!pending.length) return '';
+    // Group pending by batch
+    const pendingByBatch = {};
+    pending.forEach(p => {
+      const key = p.batchId || '__no_batch__';
+      if (!pendingByBatch[key]) pendingByBatch[key] = [];
+      pendingByBatch[key].push(p);
+    });
+    return Object.entries(pendingByBatch).map(([bKey, items]) => {
+      const b = bKey === '__no_batch__' ? null : (S.batches||[]).find(b => b.id === parseInt(bKey));
+      const isOpen = !!openBatches['whp-' + bKey];
+      const totalCost = items.reduce((a,p) => a + calcP(p).totalRub, 0);
+      const date = b ? new Date(b.date).toLocaleDateString('ru-RU', {day:'2-digit',month:'short'}) : '';
+      return `<div class="bcard" style="margin-bottom:10px;border-color:#3a1a5a">
+        <div class="bhdr" style="padding:12px 14px;background:#1a0f2e" onclick="openBatches['whp-${bKey}']=!openBatches['whp-${bKey}'];render()">
+          <span class="btog ${isOpen?'open':''}">▶</span>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:14px;color:var(--purple-light);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b ? b.label : 'Без партии'}</div>
+            <div style="font-size:12px;color:var(--text4);margin-top:2px">${date}${date?' · ':''}${items.length} поз. ожидается · <span class="acc">${fmt(totalCost)} ₽</span></div>
+          </div>
+          <button class="btn g" data-action="receive-batch" data-id="${b?b.id:0}" style="font-size:12px;padding:5px 10px;min-height:30px;flex-shrink:0" onclick="event.stopPropagation()">Принять всё</button>
         </div>
-        <button class="btn g" data-action="receive-item" data-id="${p.id}" style="font-size:13px;padding:7px 12px;min-height:38px">На склад</button>
+        ${isOpen ? `<div style="background:var(--bg);padding:0 14px">
+          ${items.map(p => {
+            const t = calcP(p);
+            return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:0.5px solid var(--border2)">
+              <div style="flex:1;min-width:0">
+                <div style="font-weight:600;color:var(--text2)">${p.name}</div>
+                <div style="font-size:12px;color:var(--text4);margin-top:2px">${p.qty} шт. · ¥${p.priceCny}/ед. · <span class="acc">${fmt(t.totalRub)} ₽</span></div>
+                ${p.sizes&&p.sizes.length?`<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px">${p.sizes.map(sz=>`<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:#221030;color:var(--purple-light)">${sz.label}×${sz.qty}</span>`).join('')}</div>`:''}
+              </div>
+              <button class="btn g" data-action="receive-item" data-id="${p.id}" style="font-size:12px;padding:6px 10px;min-height:34px;flex-shrink:0">На склад</button>
+            </div>`;
+          }).join('')}
+        </div>` : ''}
       </div>`;
-    }).join('')}
-  </div>` : ''}
+    }).join('');
+  })()}
 `;}
 
 
@@ -1680,7 +1744,17 @@ function bindFormFields() {
     if (!inp) return;
     inp.addEventListener('blur', () => { pF[key] = inp.value; });
     if (['pf-qty','pf-price','pf-rate','pf-dcny','pf-drub','pf-extras'].includes(id)) {
-      inp.addEventListener('input', () => { pF[key] = inp.value; updatePurchaseCalc(); });
+      inp.addEventListener('input', () => {
+        pF[key] = inp.value;
+        updatePurchaseCalc();
+      });
+      // Re-render toggles when leaving field
+      inp.addEventListener('blur', () => {
+        pF[key] = inp.value;
+        if (['pf-qty','pf-dcny','pf-drub','pf-extras'].includes(id)) {
+          syncPurchaseForm(); render();
+        }
+      });
     }
   });
   const pfBatch = document.getElementById('pf-batch');
@@ -1905,6 +1979,10 @@ function initClickHandler() {
       syncPurchaseForm();
       pF.delivMode = btn.dataset.mode;
       render();
+    } else if (action === 'extras-mode') {
+      syncPurchaseForm();
+      pF.extrasMode = btn.dataset.mode;
+      render();
     } else if (action === 'aapply') {
       const f = document.getElementById('a-from');
       const t = document.getElementById('a-to');
@@ -1977,11 +2055,12 @@ function addItem(status) {
     deliveryRub: nv(pF.deliveryRub) || 0,
     extras: nv(pF.extras) || 0,
     delivMode: pF.delivMode || 'total',
+    extrasMode: pF.extrasMode || 'total',
     notes: pF.notes, batchId, status, date: Date.now(),
     totalRub: t.totalRub, perUnit: t.perUnit,
     sizes: cleanSizes
   });
-  pF = { name: '', qty: '', priceCny: '', deliveryCny: '', deliveryRub: '', extras: '', customRate: '', notes: '', batchId, batchName: pF.batchName, useSizes: pF.useSizes, sizes: pF.useSizes ? [{ label:'', qty:'' }] : [], delivMode: pF.delivMode || 'total' };
+  pF = { name: '', qty: '', priceCny: '', deliveryCny: '', deliveryRub: '', extras: '', customRate: '', notes: '', batchId, batchName: pF.batchName, useSizes: pF.useSizes, sizes: pF.useSizes ? [{ label:'', qty:'' }] : [], delivMode: pF.delivMode || 'total', extrasMode: pF.extrasMode || 'total' };
   saveState();
   toast(status === 'pending' ? 'Добавлено в ожидание' : 'Добавлено на склад');
   render();
